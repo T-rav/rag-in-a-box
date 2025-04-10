@@ -32,16 +32,21 @@ services:
       - OPENAI_API_KEY=${OPENAI_API_KEY}
       - PORT=4000
       - MODEL_TYPE=openai
-      - LITELLM_CONFIG=/app/config.yaml
       - LITELLM_MASTER_KEY=sk-litellm-master-key-123456
       - LITELLM_SALT_KEY=sk-litellm-salt-key-123456
       - DATABASE_URL=postgresql://postgres:postgres@postgres:5432/litellm
       - STORE_MODEL_IN_DB=True
+      - REDIS_HOST=redis
+      - REDIS_PORT=6379
     volumes:
       - ./config/litellm_config.yaml:/app/config.yaml
       - ./rag-pipeline:/app/rag-pipeline  # Mount custom RAG code for pre-hook injection
+    command: ["--config", "/app/config.yaml", "--detailed_debug"]
+
     depends_on:
       postgres:
+        condition: service_healthy
+      redis:
         condition: service_healthy
     restart: unless-stopped
 
@@ -61,8 +66,24 @@ services:
       retries: 5
       start_period: 10s
     restart: unless-stopped
+    
+  # Redis for LiteLLM caching
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+      start_period: 5s
+    restart: unless-stopped
 
 
 volumes:
   openwebui_data:
   postgres_data:  # Persistent volume for PostgreSQL data
+  redis_data:  # Persistent volume for Redis data

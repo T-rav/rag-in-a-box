@@ -2,15 +2,41 @@ model_list:
   - model_name: gpt-4
     litellm_params:
       model: gpt-4
-      api_key: ${OPENAI_API_KEY}
+      api_base: https://api.openai.com/v1
+      api_key: os.environ/OPENAI_API_KEY
   
   - model_name: gpt-4o
     litellm_params:
       model: gpt-4o
-      api_key: ${OPENAI_API_KEY}
+      api_base: https://api.openai.com/v1
+      api_key: os.environ/OPENAI_API_KEY
 
 environment_variables:
   OPENAI_API_KEY: ${OPENAI_API_KEY}
 
 general_settings:
   completion_model: gpt-4o
+  num_workers: 4  # Increase worker count for better concurrency
+  cache: true  # Enable response caching for better performance
+  cache_params:
+    type: redis  # Use Redis for distributed caching
+    host: localhost
+    port: 6379
+    ttl: 3600  # Cache responses for 1 hour
+
+# Logging configuration
+logging:
+  level: info  # Options: debug, info, warning, error
+  log_requests: true
+  log_responses: true
+
+# Pre/post hooks for RAG capabilities
+hooks:
+  pre_request_hooks:
+    - path: /app/rag-pipeline/pre_request_hook.py:pre_request_hook
+
+# Rate limiting to prevent API key exhaustion
+rate_limits:
+  enabled: true
+  default_rpm: 60  # Default requests per minute
+  default_tpm: 100000  # Default tokens per minute
