@@ -9,11 +9,19 @@ services:
     environment:
       - OPENAI_API_KEY=${OPENAI_API_KEY}
       - LITELLM_API_BASE=http://litellm:4000
+      - HOST=0.0.0.0
+      - PORT=3000
+      - WEBUI_AUTH=false
+      - WEBUI_DB_BACKEND=sqlite
+      - DEFAULT_MODEL=gpt-4o
+      - AVAILABLE_MODELS=gpt-4,gpt-4o
     depends_on:
-      - litellm
+      litellm:
+        condition: service_started
     volumes:
       - openwebui_data:/app/backend/data
     restart: unless-stopped
+
 
   # LiteLLM Proxy service
   litellm:
@@ -33,7 +41,8 @@ services:
       - ./config/litellm_config.yaml:/app/config.yaml
       - ./rag-pipeline:/app/rag-pipeline  # Mount custom RAG code for pre-hook injection
     depends_on:
-      - postgres
+      postgres:
+        condition: service_healthy
     restart: unless-stopped
 
   # PostgreSQL Database
@@ -45,7 +54,14 @@ services:
       - POSTGRES_DB=litellm
     volumes:
       - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
     restart: unless-stopped
+
 
 volumes:
   openwebui_data:
