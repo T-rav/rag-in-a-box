@@ -42,7 +42,7 @@ services:
       - PORT=4000
       - MODEL_TYPE=openai
       - LITELLM_MASTER_KEY=sk-litellm-master-key-123456
-      - LITELLM_SALT_KEY=sk-litellm-salt-key-123456
+      - LITELLM_SALT_KEY=123456789012345678901234
       - DATABASE_URL=postgresql://postgres:postgres@postgres:5432/litellm
       - STORE_MODEL_IN_DB=True
       - REDIS_HOST=redis
