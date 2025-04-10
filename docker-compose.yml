@@ -7,12 +7,19 @@ services:
     environment:
       - HOST=0.0.0.0
       - PORT=3000
-      - WEBUI_AUTH=false
+      - WEBUI_AUTH_ENABLED=true
       - WEBUI_DB_BACKEND=sqlite
       - DEFAULT_MODEL=gpt-4o
       - OPENAI_API_KEY=sk-litellm-master-key-123456
       - OPENAI_API_BASE_URL=http://litellm:4000/v1
       - OPENAI_API_MODELS=gpt-4,gpt-4o
+      - ENABLE_SIGNUP=true
+      - WEBUI_ALLOW_PASSWORD_RESET=true
+      - WEBUI_REGISTRATION_ENABLED=true
+      - WEBUI_SHOW_REGISTRATION=true
+      - ADMIN_USERNAME=admin
+      - ADMIN_PASSWORD=admin
+      - ADMIN_EMAIL=admin@localhost
     depends_on:
       litellm:
         condition: service_started
