@@ -14,12 +14,16 @@ services:
       - OPENAI_API_BASE_URL=http://litellm:4000/v1
       - OPENAI_API_MODELS=gpt-4,gpt-4o
       - ENABLE_SIGNUP=true
+      - ENABLE_OAUTH_SIGNUP=true
+      - ENABLE_LOGIN_FORM=false
       - WEBUI_ALLOW_PASSWORD_RESET=true
       - WEBUI_REGISTRATION_ENABLED=true
       - WEBUI_SHOW_REGISTRATION=true
-      - ADMIN_USERNAME=admin
-      - ADMIN_PASSWORD=admin
-      - ADMIN_EMAIL=admin@localhost
+      - GOOGLE_CLIENT_ID=${GOOGLE_CLIENT_ID}
+      - GOOGLE_CLIENT_SECRET=${GOOGLE_CLIENT_SECRET}
+      - GOOGLE_AUTH_ENABLED=true
+      - ALLOWED_EMAIL_DOMAIN=*
+      - GOOGLE_AUTO_REGISTER=true
     depends_on:
       litellm:
         condition: service_started
