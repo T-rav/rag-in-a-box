@@ -16,7 +16,7 @@ fi
 
 # Prompt for Google OAuth credentials
 echo "Please visit https://console.cloud.google.com/apis/credentials to create OAuth credentials."
-echo "Make sure to set the authorized redirect URI to: http://localhost/auth/google/callback"
+echo "Make sure to set the authorized redirect URI to: http://localhost/auth/oauth2/google/authorization-code-callback"
 echo ""
 read -p "Enter your Google Client ID: " CLIENT_ID
 read -p "Enter your Google Client Secret: " CLIENT_SECRET

@@ -67,7 +67,7 @@ To set up Google OAuth for authentication:
 2. Create an OAuth 2.0 Client ID (Web application type)
 3. Add the following as an authorized redirect URI:
    ```
-   http://localhost/auth/google/callback
+   http://localhost/auth/oauth2/google/authorization-code-callback
    ```
 4. Copy your Client ID and Client Secret to the `.env` file or use the setup script
 5. By default, only users with email addresses from the specified domain (default: gmail.com) will be allowed access
