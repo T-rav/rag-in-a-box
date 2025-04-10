@@ -1,0 +1,16 @@
+model_list:
+  - model_name: gpt-4
+    litellm_params:
+      model: gpt-4
+      api_key: ${OPENAI_API_KEY}
+  
+  - model_name: gpt-4o
+    litellm_params:
+      model: gpt-4o
+      api_key: ${OPENAI_API_KEY}
+
+environment_variables:
+  OPENAI_API_KEY: ${OPENAI_API_KEY}
+
+general_settings:
+  completion_model: gpt-4o

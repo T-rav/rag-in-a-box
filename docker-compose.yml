@@ -1,0 +1,52 @@
+version: '3'
+
+services:
+  # OpenWebUI service
+  openwebui:
+    image: ghcr.io/open-webui/open-webui:main
+    ports:
+      - "3000:3000"
+    environment:
+      - OPENAI_API_KEY=${OPENAI_API_KEY}
+      - LITELLM_API_BASE=http://litellm:4000
+    depends_on:
+      - litellm
+    volumes:
+      - openwebui_data:/app/backend/data
+    restart: unless-stopped
+
+  # LiteLLM Proxy service
+  litellm:
+    image: ghcr.io/berriai/litellm:main-latest
+    ports:
+      - "8000:4000"
+    environment:
+      - OPENAI_API_KEY=${OPENAI_API_KEY}
+      - PORT=4000
+      - MODEL_TYPE=openai
+      - LITELLM_CONFIG=/app/config.yaml
+      - LITELLM_MASTER_KEY=sk-litellm-master-key-123456
+      - LITELLM_SALT_KEY=sk-litellm-salt-key-123456
+      - DATABASE_URL=postgresql://postgres:postgres@postgres:5432/litellm
+      - STORE_MODEL_IN_DB=True
+    volumes:
+      - ./config/litellm_config.yaml:/app/config.yaml
+      - ./rag-pipeline:/app/rag-pipeline  # Mount custom RAG code for pre-hook injection
+    depends_on:
+      - postgres
+    restart: unless-stopped
+
+  # PostgreSQL Database
+  postgres:
+    image: postgres:14
+    environment:
+      - POSTGRES_USER=postgres
+      - POSTGRES_PASSWORD=postgres
+      - POSTGRES_DB=litellm
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    restart: unless-stopped
+
+volumes:
+  openwebui_data:
+  postgres_data:  # Persistent volume for PostgreSQL data
