@@ -1,5 +1,3 @@
-version: '3'
-
 services:
   # OpenWebUI service
   openwebui:
@@ -83,32 +81,32 @@ services:
     restart: unless-stopped
 
 
-  # Caddy reverse proxy with Google authentication
-  caddy:
-    build:
-      context: ./config/caddy
-      dockerfile: Dockerfile
-    ports:
-      - "80:80"
-      - "443:443"
-    environment:
-      - GOOGLE_CLIENT_ID=${GOOGLE_CLIENT_ID}
-      - GOOGLE_CLIENT_SECRET=${GOOGLE_CLIENT_SECRET}
-      - DOMAIN=${DOMAIN:-localhost}
-      - ALLOWED_EMAIL_DOMAIN=${ALLOWED_EMAIL_DOMAIN:-gmail.com}
-    volumes:
-      - ./config/caddy/Caddyfile:/etc/caddy/Caddyfile:ro
-      - caddy_data:/data
-      - caddy_config:/config
-      - caddy_logs:/var/log/caddy
-    depends_on:
-      - openwebui
-    restart: unless-stopped
+  # Caddy reverse proxy with Google authentication (disabled)
+  # caddy:
+  #   build:
+  #     context: ./config/caddy
+  #     dockerfile: Dockerfile
+  #   ports:
+  #     - "80:80"
+  #     - "443:443"
+  #   environment:
+  #     - GOOGLE_CLIENT_ID=${GOOGLE_CLIENT_ID}
+  #     - GOOGLE_CLIENT_SECRET=${GOOGLE_CLIENT_SECRET}
+  #     - DOMAIN=${DOMAIN:-localhost}
+  #     - ALLOWED_EMAIL_DOMAIN=${ALLOWED_EMAIL_DOMAIN:-gmail.com}
+  #   volumes:
+  #     - ./config/caddy/Caddyfile:/etc/caddy/Caddyfile:ro
+  #     - caddy_data:/data
+  #     - caddy_config:/config
+  #     - caddy_logs:/var/log/caddy
+  #   depends_on:
+  #     - openwebui
+  #   restart: unless-stopped
 
 volumes:
   openwebui_data:
   postgres_data:  # Persistent volume for PostgreSQL data
   redis_data:  # Persistent volume for Redis data
-  caddy_data:  # Persistent volume for Caddy certificates
-  caddy_config:  # Persistent volume for Caddy configuration
-  caddy_logs:  # Persistent volume for Caddy logs
+  # caddy_data:  # Persistent volume for Caddy certificates
+  # caddy_config:  # Persistent volume for Caddy configuration
+  # caddy_logs:  # Persistent volume for Caddy logs
