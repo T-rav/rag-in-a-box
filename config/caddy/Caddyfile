@@ -1,0 +1,53 @@
+{
+    # Global options
+    admin off
+    auto_https off
+    debug
+    
+    security {
+        oauth identity provider google {
+            realm google
+            driver google
+            client_id {$GOOGLE_CLIENT_ID}
+            client_secret {$GOOGLE_CLIENT_SECRET}
+            scopes openid email profile
+        }
+
+        authentication portal myportal {
+            enable identity provider google
+            cookie domain {$DOMAIN}
+            ui {
+                links {
+                    "RAG in a Box" "/" icon "home"
+                }
+            }
+        }
+
+        authorization policy mypolicy {
+            set auth url /auth
+            allow domains {$ALLOWED_EMAIL_DOMAIN}
+            allow emails *@{$ALLOWED_EMAIL_DOMAIN}
+            validate bearer header
+            inject headers with claims
+        }
+    }
+}
+
+:80 {
+    # Root path with authentication
+    route /* {
+        authorize with mypolicy
+        reverse_proxy openwebui:3000
+    }
+
+    # Authentication portal
+    route /auth* {
+        authenticate with myportal
+    }
+
+    # Log requests
+    log {
+        output file /var/log/caddy/access.log
+        format console
+    }
+}
