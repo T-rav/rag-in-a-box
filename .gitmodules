@@ -1,0 +1,12 @@
+[submodule "open-webui"]
+	path = open-webui
+	url = https://github.com/open-webui/open-webui.git
+[submodule "litellm"]
+	path = litellm
+	url = https://github.com/BerriAI/litellm.git
+[submodule "caddy"]
+	path = caddy
+	url = https://github.com/caddyserver/caddy.git
+[submodule "haystack"]
+	path = haystack
+	url = https://github.com/deepset-ai/haystack.git
