@@ -2,7 +2,6 @@
     # Global options
     admin off
     auto_https off
-    debug
     
     security {
         oauth identity provider google {
@@ -16,19 +15,17 @@
         authentication portal myportal {
             enable identity provider google
             cookie domain {$DOMAIN}
-            ui {
-                links {
-                    "RAG in a Box" "/" icon "home"
-                }
-            }
         }
 
         authorization policy mypolicy {
             set auth url /auth
-            allow domains {$ALLOWED_EMAIL_DOMAIN}
-            allow emails *@{$ALLOWED_EMAIL_DOMAIN}
+            allow roles authp/user
             validate bearer header
-            inject headers with claims
+            acl rule {
+                comment "Allow users with gmail.com addresses"
+                match email domain {$ALLOWED_EMAIL_DOMAIN}
+                allow stop
+            }
         }
     }
 }
