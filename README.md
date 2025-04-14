@@ -6,6 +6,7 @@ RAG stack for chat bots that aims to be a deploy, configure and go solution.
 
 🧠 OpenWebUI  -> The chat UI because why not!  
 🔄 LiteLLM Proxy	-> Monitor, Observe and Managae LLMOps centrally - make use of LangFuse to handle prompt managment     
+📊 Apache Airflow -> ETL and scheduling engine for data ingestion and pipeline orchestration
 📚 RAG Pipeline	Python (your code) -> Custom RAG injection code loaded dynamically like a plugin _(Inject company data, do auth checks, add guardrails to make it safe and prod ready)_   
 🔍 Haystack	-> Data and agents layer for building powerful search and retrieval systems
 🛡️ Caddy	Static binary (Go)	-> Auth Proxy to allow OpenWebUI and LiteLLM to centralize auth  
@@ -86,9 +87,10 @@ To set up Google OAuth for authentication:
 
 To customize the RAG pipeline, you can:
 
-1. Modify the Haystack configuration for your specific data sources
-2. Create custom retrieval pipelines in the `rag-pipeline` directory
-3. Connect your data sources to the system
+1. Configure Airflow DAGs for your ETL workflows and scheduling needs
+2. Modify the Haystack configuration for your specific data sources
+3. Create custom retrieval pipelines in the `rag-pipeline` directory
+4. Connect your data sources to the system
 
 ## License
 
