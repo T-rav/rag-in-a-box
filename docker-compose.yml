@@ -24,7 +24,6 @@ services:
       - GOOGLE_AUTH_ENABLED=true
       - ALLOWED_EMAIL_DOMAIN=*
       - GOOGLE_AUTO_REGISTER=true
-      - REDIRECT_URL=http://localhost:8080
     depends_on:
       litellm:
         condition: service_started
@@ -110,6 +109,44 @@ services:
       - openwebui
     restart: unless-stopped
 
+  # Haystack service for RAG capabilities
+  haystack:
+    build:
+      context: ./haystack
+      dockerfile: Dockerfile
+    ports:
+      - "8501:8501"  # Streamlit UI
+      - "8500:8000"  # FastAPI
+    environment:
+      - TOKENIZERS_PARALLELISM=false
+      - ELASTICSEARCH_HOST=elasticsearch
+    volumes:
+      - ./haystack:/workspace
+    working_dir: /workspace
+    command: ./start.sh
+    depends_on:
+      elasticsearch:
+        condition: service_healthy
+    restart: unless-stopped
+    
+  # Elasticsearch for document storage and retrieval
+  elasticsearch:
+    image: docker.elastic.co/elasticsearch/elasticsearch:8.9.0
+    environment:
+      - discovery.type=single-node
+      - ES_JAVA_OPTS=-Xms512m -Xmx512m
+      - xpack.security.enabled=false
+    ports:
+      - "9200:9200"
+    volumes:
+      - elasticsearch_data:/usr/share/elasticsearch/data
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9200"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+    restart: unless-stopped
+
 volumes:
   openwebui_data:
   postgres_data:  # Persistent volume for PostgreSQL data
@@ -117,3 +154,4 @@ volumes:
   caddy_data:  # Persistent volume for Caddy certificates
   caddy_config:  # Persistent volume for Caddy configuration
   caddy_logs:  # Persistent volume for Caddy logs
+  elasticsearch_data:
