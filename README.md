@@ -1,4 +1,4 @@
-#  RAG in a Box
+# Insight Mesh
 
 RAG stack for chat bots that aims to be a deploy, configure and go solution. 
 
@@ -25,8 +25,8 @@ RAG stack for chat bots that aims to be a deploy, configure and go solution.
 
 1. Clone the repository with submodules:
    ```bash
-   git clone --recurse-submodules https://github.com/yourusername/rag-in-a-box.git
-   cd rag-in-a-box
+   git clone --recurse-submodules https://github.com/yourusername/insight-mesh.git
+   cd insight-mesh
    ```
 
    If you've already cloned without submodules:
