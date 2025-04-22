@@ -48,6 +48,7 @@ services:
       - REDIS_HOST=redis
       - REDIS_PORT=6379
       - HAYSTACK_ENDPOINT=http://haystack:8000/search
+      - HAYSTACK_MAX_RESULTS=5
     volumes:
       - ./config/litellm_config.yaml:/app/config.yaml
       - ./rag-pipeline:/app/rag-pipeline  # Mount custom RAG code for pre-hook injection

@@ -10,9 +10,9 @@ import os
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-# Configure the Haystack search endpoint
+# Configure the Haystack search endpoint from environment variables
 HAYSTACK_ENDPOINT = os.environ.get("HAYSTACK_ENDPOINT", "http://haystack:8000/search")
-MAX_RESULTS = 3
+MAX_RESULTS = int(os.environ.get("HAYSTACK_MAX_RESULTS", "3"))
 
 # todo : patch the litellm method that calls this to pass the auth token down to the rag handler
 class RAGHandler(CustomLogger):
