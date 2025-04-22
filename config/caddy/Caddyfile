@@ -42,6 +42,13 @@
         authenticate with myportal
     }
 
+    # LiteLLM proxy with token forwarding
+    route /v1/* {
+        # Extract token from cookie and add as x-auth-token header
+        header_up x-auth-token {http.request.cookie.token}
+        reverse_proxy litellm:4000
+    }
+
     # Log requests
     log {
         output file /var/log/caddy/access.log
