@@ -149,6 +149,24 @@ services:
       retries: 5
     restart: unless-stopped
 
+  # Dagster service for Google Drive integration and orchestration
+  dagster:
+    build:
+      context: ./dagster_project
+      dockerfile: Dockerfile
+    ports:
+      - "3001:3000"  # Dagster Webserver
+    environment:
+      - GOOGLE_APPLICATION_CREDENTIALS=/app/credentials.json
+      - HAYSTACK_API_URL=http://haystack:8000
+    volumes:
+      - ./dagster_project:/app
+      - ./credentials.json:/app/credentials.json
+    depends_on:
+      - haystack
+      - elasticsearch
+    restart: unless-stopped
+
 volumes:
   openwebui_data:
   postgres_data:  # Persistent volume for PostgreSQL data
