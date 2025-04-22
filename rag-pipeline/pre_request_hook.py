@@ -20,6 +20,11 @@ class RAGHandler(CustomLogger):
         call_type: Literal["completion", "text_completion", "embeddings", "image_generation", "moderation", "audio_transcription"]
     ):
         try:
+            # Log all headers from the request data
+            headers = data.get("proxy_server_request", {}).get("headers", {})
+            logger.info("=== RAG PRE-REQUEST HOOK CALLED ===")
+            logger.info(f"Headers received: {headers}")
+            
             # Only process completion requests
             if call_type != "completion":
                 return data
