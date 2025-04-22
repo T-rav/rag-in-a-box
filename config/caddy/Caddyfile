@@ -2,50 +2,24 @@
     # Global options
     admin off
     auto_https off
-    
-    security {
-        oauth identity provider google {
-            realm google
-            driver google
-            client_id {$GOOGLE_CLIENT_ID}
-            client_secret {$GOOGLE_CLIENT_SECRET}
-            scopes openid email profile
-        }
-
-        authentication portal myportal {
-            enable identity provider google
-            cookie domain {$DOMAIN}
-        }
-
-        authorization policy mypolicy {
-            set auth url /auth
-            allow roles authp/user
-            validate bearer header
-            acl rule {
-                comment "Allow users with gmail.com addresses"
-                match email domain {$ALLOWED_EMAIL_DOMAIN}
-                allow stop
-            }
-        }
-    }
 }
 
 :80 {
-    # Root path with authentication
+    # Root path - no auth, just proxy to OpenWebUI
     route /* {
-        authorize with mypolicy
         reverse_proxy openwebui:3000
     }
 
-    # Authentication portal
-    route /auth* {
-        authenticate with myportal
+    # Debug route to check cookie extraction
+    route /debug {
+        respond "Cookie token: {http.request.cookie.token}" 200
     }
 
-    # LiteLLM proxy with token forwarding
+    # LiteLLM proxy with token forwarding - ONLY for OpenWebUI to LiteLLM communication
     route /v1/* {
-        # Extract token from cookie and add as x-auth-token header
-        header_up x-auth-token {http.request.cookie.token}
+        # Only extract token from cookie and add as Authorization header
+        # This is the ONLY place where cookie-to-header conversion happens
+        header Authorization "Bearer {http.request.cookie.token}"
         reverse_proxy litellm:4000
     }
 
