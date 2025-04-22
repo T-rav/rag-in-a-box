@@ -6,6 +6,9 @@ import requests
 import json
 import os
 
+# TODO: Implement OpenWebUI integration to fetch user email based on the ID in the JWT token
+# TODO: Cache email lookups in Redis to avoid repeated API calls to OpenWebUI
+
 # Set up logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -14,7 +17,6 @@ logger = logging.getLogger(__name__)
 HAYSTACK_ENDPOINT = os.environ.get("HAYSTACK_ENDPOINT", "http://haystack:8000/search")
 MAX_RESULTS = int(os.environ.get("HAYSTACK_MAX_RESULTS", "3"))
 
-# todo : patch the litellm method that calls this to pass the auth token down to the rag handler
 class RAGHandler(CustomLogger):
     def __init__(self):
         pass

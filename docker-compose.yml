@@ -8,7 +8,12 @@ services:
       - HOST=0.0.0.0
       - PORT=3000
       - WEBUI_AUTH_ENABLED=true
-      - WEBUI_DB_BACKEND=sqlite
+      - WEBUI_DB_BACKEND=postgres
+      - POSTGRES_HOST=postgres
+      - POSTGRES_PORT=5432
+      - POSTGRES_USER=postgres
+      - POSTGRES_PASSWORD=postgres
+      - POSTGRES_DATABASE=openwebui
       - DEFAULT_MODEL=gpt-4o
       - OPENAI_API_KEY=sk-litellm-master-key-123456
       - OPENAI_API_BASE_URL=http://litellm:4000/v1
@@ -27,6 +32,8 @@ services:
     depends_on:
       litellm:
         condition: service_started
+      postgres:
+        condition: service_healthy
     volumes:
       - openwebui_data:/app/backend/data
     restart: unless-stopped
@@ -122,12 +129,25 @@ services:
     environment:
       - TOKENIZERS_PARALLELISM=false
       - ELASTICSEARCH_HOST=elasticsearch
+      - DB_HOST=postgres
+      - DB_PORT=5432
+      - DB_NAME=openwebui
+      - DB_USER=postgres
+      - DB_PASSWORD=postgres
+      - DB_USER_TABLE=users
+      - REDIS_URL=redis://redis:6379/0
+      - REDIS_ENABLED=true
+      - REDIS_TTL=3600
     volumes:
       - ./haystack:/workspace
     working_dir: /workspace
     command: ./start.sh
     depends_on:
       elasticsearch:
+        condition: service_healthy
+      postgres:
+        condition: service_healthy
+      redis:
         condition: service_healthy
     restart: unless-stopped
     
