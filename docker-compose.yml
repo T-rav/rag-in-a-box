@@ -47,11 +47,12 @@ services:
       - STORE_MODEL_IN_DB=True
       - REDIS_HOST=redis
       - REDIS_PORT=6379
+      - HAYSTACK_ENDPOINT=http://haystack:8000/search
     volumes:
       - ./config/litellm_config.yaml:/app/config.yaml
       - ./rag-pipeline:/app/rag-pipeline  # Mount custom RAG code for pre-hook injection
-    command: ["--config", "/app/config.yaml", "--detailed_debug"]
-
+    command: >
+      sh -c "pip install requests && python -m litellm --config /app/config.yaml --detailed_debug"
     depends_on:
       postgres:
         condition: service_healthy
