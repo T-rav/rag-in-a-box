@@ -32,7 +32,6 @@ class GoogleDriveConfig(Config):
     file_types: List[str] = [".txt", ".md", ".pdf", ".docx"]
     max_files: int = 1000
     recursive: bool = True  # Whether to recursively traverse folders
-    admin_email: str = os.getenv("ADMIN_EMAIL", "")  # Email of admin user who can see all files
 
 @asset
 def google_drive_service(context: AssetExecutionContext, config: GoogleDriveConfig):
@@ -241,10 +240,6 @@ def haystack_indexed_files(
                     
                 permissions.append(permission_entry)
             
-            # Always add admin email if configured
-            if config.admin_email and config.admin_email not in accessible_by_emails:
-                accessible_by_emails.append(config.admin_email)
-            
             # Prepare document metadata
             metadata = {
                 "source": f"google_drive:{file_id}",
@@ -287,7 +282,6 @@ def haystack_indexed_files(
     context.add_output_metadata({
         "indexed_count": len(indexed_files),
         "failed_count": len(failed_files),
-        "admin_email": MetadataValue.text(config.admin_email if config.admin_email else "Not configured"),
         "indexed_files": MetadataValue.json(indexed_files[:5] if indexed_files else []),
         "failed_files": MetadataValue.json(failed_files[:5] if failed_files else [])
     })
