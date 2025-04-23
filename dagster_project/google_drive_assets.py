@@ -30,7 +30,9 @@ class GoogleDriveConfig(Config):
     haystack_api_url: str = os.getenv("HAYSTACK_API_URL", "http://haystack:8000")
     folder_ids: List[str] = [] 
     file_types: List[str] = [".txt", ".md", ".pdf", ".docx"]
-    max_files: int = 100
+    max_files: int = 1000
+    recursive: bool = True  # Whether to recursively traverse folders
+    admin_email: str = os.getenv("ADMIN_EMAIL", "")  # Email of admin user who can see all files
 
 @asset
 def google_drive_service(context: AssetExecutionContext, config: GoogleDriveConfig):
@@ -53,6 +55,97 @@ def google_drive_service(context: AssetExecutionContext, config: GoogleDriveConf
         logger.error(f"Error creating Google Drive service: {e}")
         raise
 
+def fetch_files_recursive(service, folder_id, context, config, depth=0, max_depth=10):
+    """
+    Recursively fetch files from a folder and its subfolders
+    
+    Args:
+        service: Google Drive service instance
+        folder_id: ID of the folder to process
+        context: Dagster execution context
+        config: Configuration object
+        depth: Current recursion depth
+        max_depth: Maximum recursion depth to prevent infinite loops
+        
+    Returns:
+        List of file metadata dictionaries
+    """
+    if depth > max_depth:
+        context.log.warning(f"Reached maximum recursion depth ({max_depth}) for folder {folder_id}")
+        return []
+        
+    all_files = []
+    
+    try:
+        # Get folder info
+        folder_info = service.files().get(fileId=folder_id, fields="name,id").execute()
+        folder_name = folder_info.get("name", folder_id)
+        
+        context.log.info(f"Processing folder (depth {depth}): {folder_name} ({folder_id})")
+        
+        # Query files in the folder
+        query = f"'{folder_id}' in parents and trashed = false"
+        
+        # Process files in batches with pagination to handle large folders
+        page_token = None
+        files_processed = 0
+        
+        while True:
+            # Check if we've reached the max files limit
+            if files_processed >= config.max_files:
+                context.log.info(f"Reached max files limit ({config.max_files}) for folder {folder_name}")
+                break
+                
+            response = service.files().list(
+                q=query,
+                fields="nextPageToken, files(id, name, mimeType, createdTime, modifiedTime, size, webViewLink, permissions)",
+                pageToken=page_token,
+                pageSize=min(100, config.max_files - files_processed)  # Process in batches of up to 100
+            ).execute()
+            
+            items = response.get('files', [])
+            
+            for item in items:
+                # If it's a folder and recursive is enabled, process it recursively
+                if item['mimeType'] == 'application/vnd.google-apps.folder' and config.recursive:
+                    subfolder_files = fetch_files_recursive(
+                        service, 
+                        item['id'], 
+                        context, 
+                        config, 
+                        depth + 1,
+                        max_depth
+                    )
+                    all_files.extend(subfolder_files)
+                    
+                # For files, check if they match the supported file types
+                elif any(item['name'].endswith(ext) for ext in config.file_types):
+                    # Get detailed permissions
+                    try:
+                        perms = service.permissions().list(
+                            fileId=item['id'], 
+                            fields="permissions(id,type,emailAddress,role,domain)"
+                        ).execute()
+                        item['detailed_permissions'] = perms.get('permissions', [])
+                        
+                        # Add file to our collection
+                        all_files.append(item)
+                        files_processed += 1
+                    except Exception as e:
+                        context.log.warning(f"Error getting permissions for {item['name']}: {e}")
+            
+            # Get the next page token
+            page_token = response.get('nextPageToken')
+            
+            # Break if no more pages or we've reached the file limit
+            if not page_token or files_processed >= config.max_files:
+                break
+                
+    except HttpError as error:
+        context.log.error(f"Error accessing folder {folder_id}: {error}")
+        
+    return all_files
+
 @asset(deps=[google_drive_service])
 def google_drive_files(context: AssetExecutionContext, config: GoogleDriveConfig, google_drive_service):
     """Fetch files from Google Drive folders with permissions."""
@@ -66,48 +159,25 @@ def google_drive_files(context: AssetExecutionContext, config: GoogleDriveConfig
     
     for folder_id in folder_ids:
         try:
-            # Get folder info
-            folder_info = service.files().get(fileId=folder_id, fields="name,id").execute()
-            folder_name = folder_info.get("name", folder_id)
+            # Use the recursive function to fetch files
+            folder_files = fetch_files_recursive(service, folder_id, context, config)
             
-            context.log.info(f"Processing folder: {folder_name} ({folder_id})")
-            
-            # Query files in the folder
-            query = f"'{folder_id}' in parents and trashed = false"
-            response = service.files().list(
-                q=query,
-                fields="files(id, name, mimeType, createdTime, modifiedTime, size, webViewLink, permissions)",
-                pageSize=config.max_files
-            ).execute()
-            
-            files = response.get('files', [])
-            
-            # Get detailed permission info for each file
-            for file in files:
-                # Filter by supported file types
-                if not any(file['name'].endswith(ext) for ext in config.file_types):
-                    continue
+            # Add size information
+            for file in folder_files:
+                total_size += int(file.get('size', 0))
                 
-                # Get permissions
-                try:
-                    perms = service.permissions().list(
-                        fileId=file['id'], 
-                        fields="permissions(id,type,emailAddress,role,domain)"
-                    ).execute()
-                    file['detailed_permissions'] = perms.get('permissions', [])
-                    
-                    # Add file to our collection
-                    all_files.append(file)
-                    total_size += int(file.get('size', 0))
-                except Exception as e:
-                    context.log.warning(f"Error getting permissions for {file['name']}: {e}")
-        
+            # Add files to our collection
+            all_files.extend(folder_files)
+            
+            context.log.info(f"Found {len(folder_files)} files in folder {folder_id} and its subfolders")
+            
         except HttpError as error:
             context.log.error(f"Error accessing folder {folder_id}: {error}")
     
     context.add_output_metadata({
         "num_files": len(all_files),
         "total_size_bytes": total_size,
+        "recursive_mode": MetadataValue.text("Enabled" if config.recursive else "Disabled"),
         "preview": MetadataValue.json(all_files[:5] if all_files else [])
     })
     
@@ -145,18 +215,35 @@ def haystack_indexed_files(
             
             # Extract permissions info for metadata
             permissions = []
+            is_public = False
+            accessible_by_emails = []
+            accessible_by_domains = []
+            
             for perm in file.get('detailed_permissions', []):
                 permission_entry = {
                     "type": perm.get('type'),
                     "role": perm.get('role'),
                 }
                 
+                # Check if file is public
+                if perm.get('type') == 'anyone' and perm.get('role') in ['reader', 'writer', 'owner']:
+                    is_public = True
+                
+                # Track email access
                 if 'emailAddress' in perm:
                     permission_entry['email'] = perm['emailAddress']
+                    accessible_by_emails.append(perm['emailAddress'])
+                
+                # Track domain access
                 if 'domain' in perm:
                     permission_entry['domain'] = perm['domain']
+                    accessible_by_domains.append(perm['domain'])
                     
                 permissions.append(permission_entry)
+            
+            # Always add admin email if configured
+            if config.admin_email and config.admin_email not in accessible_by_emails:
+                accessible_by_emails.append(config.admin_email)
             
             # Prepare document metadata
             metadata = {
@@ -167,7 +254,10 @@ def haystack_indexed_files(
                 "created_time": file.get('createdTime'),
                 "modified_time": file.get('modifiedTime'),
                 "web_link": file.get('webViewLink'),
-                "permissions": permissions
+                "permissions": permissions,
+                "is_public": is_public,
+                "accessible_by_emails": accessible_by_emails,
+                "accessible_by_domains": accessible_by_domains
             }
             
             # Index in Haystack
@@ -197,6 +287,7 @@ def haystack_indexed_files(
     context.add_output_metadata({
         "indexed_count": len(indexed_files),
         "failed_count": len(failed_files),
+        "admin_email": MetadataValue.text(config.admin_email if config.admin_email else "Not configured"),
         "indexed_files": MetadataValue.json(indexed_files[:5] if indexed_files else []),
         "failed_files": MetadataValue.json(failed_files[:5] if failed_files else [])
     })
