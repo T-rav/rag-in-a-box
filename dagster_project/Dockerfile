@@ -19,5 +19,5 @@ COPY . .
 # Expose the port that dagster webserver will run on
 EXPOSE 3000
 
-# Start the dagster daemon and webserver
-CMD ["dagster", "dev", "-h", "0.0.0.0"] 
+# Start the dagster webserver
+CMD ["dagster", "dev", "-h", "0.0.0.0", "-p", "3000", "-f", "google_drive_assets.py"] 

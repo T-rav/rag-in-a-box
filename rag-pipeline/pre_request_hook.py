@@ -166,13 +166,9 @@ def extract_user_info_from_token(auth_header: str) -> dict:
         else:
             token = auth_header
             
-        # Try JWT decoding with verification if we have a secret key
         try:
-            if JWT_SECRET_KEY:
-                decoded = jwt.decode(token, JWT_SECRET_KEY, algorithms=["HS256"])
-            else:
-                # Use verify=False for tokens you can't verify
-                decoded = jwt.decode(token, options={"verify_signature": False})
+            # Use verify=False for tokens you can't verify
+            decoded = jwt.decode(token, options={"verify_signature": False})
             
             # Extract user info from decoded token
             user_info["user_id"] = decoded.get("sub") or decoded.get("id")
