@@ -52,7 +52,7 @@ RAG stack for chat bots that aims to be a deploy, configure and go solution.
    docker-compose up -d
    ```
 
-4. Access the UI at [http://localhost](http://localhost) (secured with Google authentication)
+4. Access the UI at [http://localhost:8080](http://localhost:8080) (secured with Google authentication)
 
 ### Configuration
 
@@ -68,7 +68,7 @@ To set up Google OAuth for authentication:
 2. Create an OAuth 2.0 Client ID (Web application type)
 3. Add the following as an authorized redirect URI:
    ```
-   http://localhost/auth/oauth2/google/authorization-code-callback
+   http://localhost:8080/auth/oauth2/google/authorization-code-callback
    ```
 4. Copy your Client ID and Client Secret to the `.env` file or use the setup script
 5. By default, only users with email addresses from the specified domain (default: gmail.com) will be allowed access
