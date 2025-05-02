@@ -2,6 +2,16 @@
 
 This directory should contain your Google Drive API credentials file (`credentials.json`).
 
+## Enable the Google Drive API
+
+Before creating credentials, you must enable the Google Drive API for your project:
+
+1. Go to the [Google Cloud Console](https://console.cloud.google.com/).
+2. Select your project (or create a new one).
+3. Navigate to "APIs & Services" > "Library".
+4. Search for "Google Drive API".
+5. Click on it and press "Enable".
+
 ## How to Create Service Account Credentials
 
 1. Go to the [Google Cloud Console](https://console.cloud.google.com/).

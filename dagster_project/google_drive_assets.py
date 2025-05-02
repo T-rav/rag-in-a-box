@@ -263,13 +263,13 @@ def google_drive_files(context: AssetExecutionContext, config: GoogleDriveConfig
     return all_files
 
 @asset
-def haystack_indexed_files(
+def index_files(
     context: AssetExecutionContext,
     config: GoogleDriveConfig,
     google_drive_files: List[Dict[str, Any]],
     google_drive_service
 ):
-    """Index Google Drive files in Haystack."""
+    """Index Google Drive files in Elasticsearch and Neo4j."""
     service = google_drive_service
     
     # Group files by their required permission levels
@@ -335,25 +335,48 @@ def haystack_indexed_files(
                 "accessible_by_domains": accessible_by_domains
             }
             
-            # Index in Haystack
-            indexing_response = requests.post(
-                f"{config.haystack_api_url}/search",
-                json={
-                    "query": "",  # Empty query for indexing
-                    "action": "index",
-                    "document": {
-                        "content": content.decode('utf-8') if isinstance(content, bytes) else content,
-                        "meta": metadata
-                    }
+            # Index in Elasticsearch
+            es.index(
+                index="google_drive_files",
+                id=file_id,
+                document={
+                    "content": content.decode('utf-8') if isinstance(content, bytes) else content,
+                    "meta": metadata
                 }
             )
             
-            if indexing_response.status_code == 200:
-                indexed_files.append(file_id)
-                context.log.info(f"Successfully indexed: {file_name}")
-            else:
-                context.log.error(f"Failed to index {file_name}: {indexing_response.text}")
-                failed_files.append(file_id)
+            # Store in Neo4j
+            with neo4j_driver.session() as session:
+                session.run("""
+                    MERGE (f:File {id: $file_id})
+                    SET f.name = $file_name,
+                        f.mime_type = $mime_type,
+                        f.created_time = $created_time,
+                        f.modified_time = $modified_time,
+                        f.web_link = $web_link,
+                        f.is_public = $is_public
+                    WITH f
+                    UNWIND $accessible_by_emails as email
+                    MERGE (u:User {email: email})
+                    MERGE (f)-[:ACCESSIBLE_BY]->(u)
+                    WITH f
+                    UNWIND $accessible_by_domains as domain
+                    MERGE (d:Domain {name: domain})
+                    MERGE (f)-[:ACCESSIBLE_BY_DOMAIN]->(d)
+                """, {
+                    "file_id": file_id,
+                    "file_name": file_name,
+                    "mime_type": mime_type,
+                    "created_time": file.get('createdTime'),
+                    "modified_time": file.get('modifiedTime'),
+                    "web_link": file.get('webViewLink'),
+                    "is_public": is_public,
+                    "accessible_by_emails": accessible_by_emails,
+                    "accessible_by_domains": accessible_by_domains
+                })
+            
+            indexed_files.append(file_id)
+            context.log.info(f"Successfully indexed: {file_name}")
                 
         except Exception as e:
             context.log.error(f"Error processing file {file.get('name', 'unknown')}: {e}")
@@ -371,140 +394,10 @@ def haystack_indexed_files(
         "failed_files": failed_files
     }
 
-@asset
-def fetch_google_drive_files(context: AssetExecutionContext):
-    """Fetch files from Google Drive and store content in Elasticsearch, relationships in Neo4j."""
-    service = get_google_drive_service()
-    results = service.files().list(
-        pageSize=100,
-        fields="nextPageToken, files(id, name, mimeType, createdTime, modifiedTime, owners, webViewLink, parents)"
-    ).execute()
-    items = results.get('files', [])
-    
-    # Create Elasticsearch index with proper mapping
-    if not es.indices.exists(index="google_drive_files"):
-        es.indices.create(
-            index="google_drive_files",
-            mappings={
-                "properties": {
-                    "id": {"type": "keyword"},
-                    "name": {"type": "text", "analyzer": "standard"},
-                    "mimeType": {"type": "keyword"},
-                    "createdTime": {"type": "date"},
-                    "modifiedTime": {"type": "date"},
-                    "webViewLink": {"type": "keyword"},
-                    "content": {"type": "text", "analyzer": "standard"},
-                    "owners": {
-                        "type": "nested",
-                        "properties": {
-                            "emailAddress": {"type": "keyword"},
-                            "displayName": {"type": "text"}
-                        }
-                    }
-                }
-            }
-        )
-    
-    # Store in Neo4j - only relationships and minimal metadata
-    with neo4j_driver.session() as session:
-        # Create constraints if they don't exist
-        session.run("""
-            CREATE CONSTRAINT file_id IF NOT EXISTS
-            FOR (f:File) REQUIRE f.id IS UNIQUE
-        """)
-        session.run("""
-            CREATE CONSTRAINT owner_email IF NOT EXISTS
-            FOR (o:Owner) REQUIRE o.email IS UNIQUE
-        """)
-        
-        for item in items:
-            # Store minimal metadata in Neo4j
-            session.run("""
-                MERGE (f:File {id: $id})
-                SET f.name = $name
-                WITH f
-                UNWIND $owners as owner
-                MERGE (o:Owner {email: owner.emailAddress})
-                MERGE (f)-[:OWNED_BY]->(o)
-                WITH f, owner
-                WHERE $parents IS NOT NULL
-                UNWIND $parents as parent_id
-                MERGE (p:Folder {id: parent_id})
-                MERGE (f)-[:IN_FOLDER]->(p)
-            """, **item)
-    
-    # Store full content in Elasticsearch
-    for item in items:
-        try:
-            # Get file content based on mime type
-            if 'google-apps' in item['mimeType']:
-                # For Google Docs, export as text
-                content = service.files().export(
-                    fileId=item['id'],
-                    mimeType='text/plain'
-                ).execute()
-            else:
-                # For other files, download content
-                content = service.files().get_media(fileId=item['id']).execute()
-            
-            # Index in Elasticsearch with full content
-            es.index(
-                index="google_drive_files",
-                id=item['id'],
-                document={
-                    **item,
-                    "content": content.decode('utf-8') if isinstance(content, bytes) else content
-                }
-            )
-        except Exception as e:
-            context.log.error(f"Error processing file {item['id']}: {e}")
-    
-    return len(items)
-
-@asset
-def process_file_relationships(context: AssetExecutionContext):
-    """Process relationships between files based on their content and metadata."""
-    with neo4j_driver.session() as session:
-        # Find similar files based on content (using Elasticsearch)
-        similar_files = es.search(
-            index="google_drive_files",
-            body={
-                "query": {
-                    "more_like_this": {
-                        "fields": ["content"],
-                        "like": [],
-                        "min_term_freq": 1,
-                        "max_query_terms": 12
-                    }
-                }
-            }
-        )
-        
-        # Store similarity relationships in Neo4j
-        for hit in similar_files['hits']['hits']:
-            source_id = hit['_id']
-            for similar_hit in hit['_source'].get('similar_files', []):
-                session.run("""
-                    MATCH (f1:File {id: $source_id})
-                    MATCH (f2:File {id: $similar_id})
-                    MERGE (f1)-[:SIMILAR_TO {score: $score}]->(f2)
-                """, {
-                    "source_id": source_id,
-                    "similar_id": similar_hit['id'],
-                    "score": similar_hit['score']
-                })
-        
-        # Count relationships
-        result = session.run("""
-            MATCH ()-[r]->()
-            RETURN type(r) as relationship_type, count(*) as count
-        """)
-        return {record["relationship_type"]: record["count"] for record in result}
-
 # Define jobs
 google_drive_indexing_job = define_asset_job(
     name="google_drive_indexing_job",
-    selection=[haystack_indexed_files]
+    selection=[index_files]
 )
 
 # Define schedules
@@ -515,7 +408,7 @@ google_drive_schedule = ScheduleDefinition(
 
 # Create definitions object
 defs = Definitions(
-    assets=[google_drive_service, google_drive_files, haystack_indexed_files, fetch_google_drive_files, process_file_relationships],
+    assets=[google_drive_service, google_drive_files, index_files],
     schedules=[google_drive_schedule],
     jobs=[google_drive_indexing_job],
 ) 
