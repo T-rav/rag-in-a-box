@@ -179,3 +179,6 @@ credentials/credentials.json
 *.err
 *.out
 *.complete
+google_drive_files
+google_drive_service
+index_files
