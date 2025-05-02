@@ -4,10 +4,16 @@ from typing import Dict, List, Any, Optional
 import logging
 import requests
 from datetime import datetime, timedelta
+import pickle
 
 from google.oauth2 import service_account
 from googleapiclient.discovery import build
 from googleapiclient.errors import HttpError
+from google.oauth2.credentials import Credentials
+from google_auth_oauthlib.flow import InstalledAppFlow
+from google.auth.transport.requests import Request
+from elasticsearch import Elasticsearch
+from neo4j import GraphDatabase
 
 from dagster import (
     asset,
@@ -18,6 +24,7 @@ from dagster import (
     ScheduleDefinition,
     define_asset_job,
     AssetKey,
+    EnvVar,
 )
 
 # Configure logging
@@ -32,6 +39,35 @@ class GoogleDriveConfig(Config):
     file_types: List[str] = [".txt", ".md", ".pdf", ".docx"]
     max_files: int = 1000
     recursive: bool = True  # Whether to recursively traverse folders
+
+# Initialize connections
+es = Elasticsearch([EnvVar("ELASTICSEARCH_HOST").get_value()])
+neo4j_driver = GraphDatabase.driver(
+    EnvVar("NEO4J_URI").get_value(),
+    auth=(
+        EnvVar("NEO4J_USER").get_value(),
+        EnvVar("NEO4J_PASSWORD").get_value()
+    )
+)
+
+# Google Drive setup
+SCOPES = ['https://www.googleapis.com/auth/drive.readonly']
+
+def get_google_drive_service():
+    creds = None
+    if os.path.exists('token.pickle'):
+        with open('token.pickle', 'rb') as token:
+            creds = pickle.load(token)
+    if not creds or not creds.valid:
+        if creds and creds.expired and creds.refresh_token:
+            creds.refresh(Request())
+        else:
+            flow = InstalledAppFlow.from_client_secrets_file(
+                'credentials.json', SCOPES)
+            creds = flow.run_local_server(port=0)
+        with open('token.pickle', 'wb') as token:
+            pickle.dump(creds, token)
+    return build('drive', 'v3', credentials=creds)
 
 @asset
 def google_drive_service(context: AssetExecutionContext, config: GoogleDriveConfig):
@@ -291,6 +327,136 @@ def haystack_indexed_files(
         "failed_files": failed_files
     }
 
+@asset
+def fetch_google_drive_files(context: AssetExecutionContext):
+    """Fetch files from Google Drive and store content in Elasticsearch, relationships in Neo4j."""
+    service = get_google_drive_service()
+    results = service.files().list(
+        pageSize=100,
+        fields="nextPageToken, files(id, name, mimeType, createdTime, modifiedTime, owners, webViewLink, parents)"
+    ).execute()
+    items = results.get('files', [])
+    
+    # Create Elasticsearch index with proper mapping
+    if not es.indices.exists(index="google_drive_files"):
+        es.indices.create(
+            index="google_drive_files",
+            mappings={
+                "properties": {
+                    "id": {"type": "keyword"},
+                    "name": {"type": "text", "analyzer": "standard"},
+                    "mimeType": {"type": "keyword"},
+                    "createdTime": {"type": "date"},
+                    "modifiedTime": {"type": "date"},
+                    "webViewLink": {"type": "keyword"},
+                    "content": {"type": "text", "analyzer": "standard"},
+                    "owners": {
+                        "type": "nested",
+                        "properties": {
+                            "emailAddress": {"type": "keyword"},
+                            "displayName": {"type": "text"}
+                        }
+                    }
+                }
+            }
+        )
+    
+    # Store in Neo4j - only relationships and minimal metadata
+    with neo4j_driver.session() as session:
+        # Create constraints if they don't exist
+        session.run("""
+            CREATE CONSTRAINT file_id IF NOT EXISTS
+            FOR (f:File) REQUIRE f.id IS UNIQUE
+        """)
+        session.run("""
+            CREATE CONSTRAINT owner_email IF NOT EXISTS
+            FOR (o:Owner) REQUIRE o.email IS UNIQUE
+        """)
+        
+        for item in items:
+            # Store minimal metadata in Neo4j
+            session.run("""
+                MERGE (f:File {id: $id})
+                SET f.name = $name
+                WITH f
+                UNWIND $owners as owner
+                MERGE (o:Owner {email: owner.emailAddress})
+                MERGE (f)-[:OWNED_BY]->(o)
+                WITH f, owner
+                WHERE $parents IS NOT NULL
+                UNWIND $parents as parent_id
+                MERGE (p:Folder {id: parent_id})
+                MERGE (f)-[:IN_FOLDER]->(p)
+            """, **item)
+    
+    # Store full content in Elasticsearch
+    for item in items:
+        try:
+            # Get file content based on mime type
+            if 'google-apps' in item['mimeType']:
+                # For Google Docs, export as text
+                content = service.files().export(
+                    fileId=item['id'],
+                    mimeType='text/plain'
+                ).execute()
+            else:
+                # For other files, download content
+                content = service.files().get_media(fileId=item['id']).execute()
+            
+            # Index in Elasticsearch with full content
+            es.index(
+                index="google_drive_files",
+                id=item['id'],
+                document={
+                    **item,
+                    "content": content.decode('utf-8') if isinstance(content, bytes) else content
+                }
+            )
+        except Exception as e:
+            context.log.error(f"Error processing file {item['id']}: {e}")
+    
+    return len(items)
+
+@asset
+def process_file_relationships(context: AssetExecutionContext):
+    """Process relationships between files based on their content and metadata."""
+    with neo4j_driver.session() as session:
+        # Find similar files based on content (using Elasticsearch)
+        similar_files = es.search(
+            index="google_drive_files",
+            body={
+                "query": {
+                    "more_like_this": {
+                        "fields": ["content"],
+                        "like": [],
+                        "min_term_freq": 1,
+                        "max_query_terms": 12
+                    }
+                }
+            }
+        )
+        
+        # Store similarity relationships in Neo4j
+        for hit in similar_files['hits']['hits']:
+            source_id = hit['_id']
+            for similar_hit in hit['_source'].get('similar_files', []):
+                session.run("""
+                    MATCH (f1:File {id: $source_id})
+                    MATCH (f2:File {id: $similar_id})
+                    MERGE (f1)-[:SIMILAR_TO {score: $score}]->(f2)
+                """, {
+                    "source_id": source_id,
+                    "similar_id": similar_hit['id'],
+                    "score": similar_hit['score']
+                })
+        
+        # Count relationships
+        result = session.run("""
+            MATCH ()-[r]->()
+            RETURN type(r) as relationship_type, count(*) as count
+        """)
+        return {record["relationship_type"]: record["count"] for record in result}
+
 # Define jobs
 google_drive_indexing_job = define_asset_job(
     name="google_drive_indexing_job",
@@ -305,7 +471,7 @@ google_drive_schedule = ScheduleDefinition(
 
 # Create definitions object
 defs = Definitions(
-    assets=[google_drive_service, google_drive_files, haystack_indexed_files],
+    assets=[google_drive_service, google_drive_files, haystack_indexed_files, fetch_google_drive_files, process_file_relationships],
     schedules=[google_drive_schedule],
     jobs=[google_drive_indexing_job],
 ) 

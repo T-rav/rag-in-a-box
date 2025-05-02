@@ -54,11 +54,8 @@ services:
       - STORE_MODEL_IN_DB=True
       - REDIS_HOST=redis
       - REDIS_PORT=6379
-      - HAYSTACK_ENDPOINT=http://haystack:8000/search
-      - HAYSTACK_MAX_RESULTS=5
     volumes:
       - ./config/litellm_config.yaml:/app/config.yaml
-      - ./rag-pipeline:/app/rag-pipeline  # Mount custom RAG code for pre-hook injection
     command: ["--config", "/app/config.yaml", "--detailed_debug"]
     depends_on:
       postgres:
@@ -117,39 +114,6 @@ services:
       - openwebui
     restart: unless-stopped
 
-  # Haystack service for RAG capabilities
-  haystack:
-    build:
-      context: ./haystack
-      dockerfile: Dockerfile
-    ports:
-      - "8501:8501"  # Streamlit UI
-      - "8500:8000"  # FastAPI
-    environment:
-      - TOKENIZERS_PARALLELISM=false
-      - ELASTICSEARCH_HOST=elasticsearch
-      - DB_HOST=postgres
-      - DB_PORT=5432
-      - DB_NAME=openwebui
-      - DB_USER=postgres
-      - DB_PASSWORD=postgres
-      - DB_USER_TABLE=users
-      - REDIS_URL=redis://redis:6379/0
-      - REDIS_ENABLED=true
-      - REDIS_TTL=3600
-    volumes:
-      - ./haystack:/workspace
-    working_dir: /workspace
-    command: ./start.sh
-    depends_on:
-      elasticsearch:
-        condition: service_healthy
-      postgres:
-        condition: service_healthy
-      redis:
-        condition: service_healthy
-    restart: unless-stopped
-    
   # Elasticsearch for document storage and retrieval
   elasticsearch:
     image: docker.elastic.co/elasticsearch/elasticsearch:8.9.0
@@ -161,14 +125,51 @@ services:
       - "9200:9200"
     volumes:
       - elasticsearch_data:/usr/share/elasticsearch/data
+      - ./config/elasticsearch/init.sh:/usr/local/bin/init-elasticsearch.sh
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:9200"]
       interval: 30s
       timeout: 10s
       retries: 5
     restart: unless-stopped
+    command: >
+      bash -c "
+        /usr/local/bin/docker-entrypoint.sh &
+        sleep 30 &&
+        chmod +x /usr/local/bin/init-elasticsearch.sh &&
+        /usr/local/bin/init-elasticsearch.sh &&
+        wait
+      "
 
-  # Dagster service for Google Drive integration and orchestration
+  # Neo4j Graph Database
+  neo4j:
+    image: neo4j:5.13.0
+    environment:
+      - NEO4J_AUTH=neo4j/password
+      - NEO4J_dbms_memory_pagecache_size=512M
+      - NEO4J_dbms_memory_heap_initial__size=512M
+      - NEO4J_dbms_memory_heap_max__size=512M
+      - NEO4J_dbms_security_procedures_unrestricted=apoc.*
+      - NEO4J_apoc_export_file_enabled=true
+      - NEO4J_apoc_import_file_enabled=true
+      - NEO4J_apoc_import_file_use__neo4j__config=true
+      - NEO4J_PLUGINS=["apoc"]
+    ports:
+      - "7474:7474"  # HTTP
+      - "7687:7687"  # Bolt
+    volumes:
+      - neo4j_data:/data
+      - neo4j_logs:/logs
+      - ./config/neo4j/init.cypher:/docker-entrypoint-initdb.d/init.cypher
+      - ./config/neo4j/plugins:/plugins
+    healthcheck:
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:7474"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+    restart: unless-stopped
+
+  # Dagster service for data pipeline orchestration
   dagster:
     build:
       context: ./dagster_project
@@ -177,13 +178,16 @@ services:
       - "3001:3000"  # Dagster Webserver
     environment:
       - GOOGLE_APPLICATION_CREDENTIALS=/app/credentials.json
-      - HAYSTACK_API_URL=http://haystack:8000
+      - ELASTICSEARCH_HOST=elasticsearch
+      - NEO4J_URI=bolt://neo4j:7687
+      - NEO4J_USER=neo4j
+      - NEO4J_PASSWORD=password
     volumes:
       - ./dagster_project:/app
       - ./credentials.json:/app/credentials.json
     depends_on:
-      - haystack
       - elasticsearch
+      - neo4j
     restart: unless-stopped
 
 volumes:
@@ -194,3 +198,5 @@ volumes:
   caddy_config:  # Persistent volume for Caddy configuration
   caddy_logs:  # Persistent volume for Caddy logs
   elasticsearch_data:
+  neo4j_data:  # Persistent volume for Neo4j data
+  neo4j_logs:  # Persistent volume for Neo4j logs
