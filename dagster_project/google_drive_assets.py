@@ -40,12 +40,18 @@ class GoogleDriveConfig(Config):
     recursive: bool = True  # Whether to recursively traverse folders
 
 # Initialize connections
-es = Elasticsearch([EnvVar("ELASTICSEARCH_HOST").get_value()])
+es = Elasticsearch(
+    hosts=[{
+        'scheme': 'http',
+        'host': os.getenv("ELASTICSEARCH_HOST", "elasticsearch"),
+        'port': int(os.getenv("ELASTICSEARCH_PORT", "9200"))
+    }]
+)
 neo4j_driver = GraphDatabase.driver(
-    EnvVar("NEO4J_URI").get_value(),
+    os.getenv("NEO4J_URI", "bolt://neo4j:7687"),
     auth=(
-        EnvVar("NEO4J_USER").get_value(),
-        EnvVar("NEO4J_PASSWORD").get_value()
+        os.getenv("NEO4J_USER", "neo4j"),
+        os.getenv("NEO4J_PASSWORD", "password")
     )
 )
 
@@ -222,7 +228,7 @@ def list_shared_resources(service, context):
             
     return shared_files
 
-@asset(deps=[google_drive_service])
+@asset
 def google_drive_files(context: AssetExecutionContext, config: GoogleDriveConfig, google_drive_service):
     """Fetch files from Google Drive folders with permissions."""
     service = google_drive_service
@@ -256,7 +262,7 @@ def google_drive_files(context: AssetExecutionContext, config: GoogleDriveConfig
     
     return all_files
 
-@asset(deps=[google_drive_files])
+@asset
 def haystack_indexed_files(
     context: AssetExecutionContext,
     config: GoogleDriveConfig,
@@ -498,7 +504,7 @@ def process_file_relationships(context: AssetExecutionContext):
 # Define jobs
 google_drive_indexing_job = define_asset_job(
     name="google_drive_indexing_job",
-    selection=[google_drive_service, google_drive_files, haystack_indexed_files]
+    selection=[haystack_indexed_files]
 )
 
 # Define schedules
