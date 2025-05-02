@@ -35,7 +35,6 @@ logger = logging.getLogger(__name__)
 class GoogleDriveConfig(Config):
     credentials_file: str = os.getenv("GOOGLE_APPLICATION_CREDENTIALS", "credentials.json")
     haystack_api_url: str = os.getenv("HAYSTACK_API_URL", "http://haystack:8000")
-    folder_ids: List[str] = [] 
     file_types: List[str] = [".txt", ".md", ".pdf", ".docx"]
     max_files: int = 1000
     recursive: bool = True  # Whether to recursively traverse folders
@@ -181,33 +180,72 @@ def fetch_files_recursive(service, folder_id, context, config, depth=0, max_dept
         
     return all_files
 
+def list_shared_resources(service, context):
+    """List all files and folders shared with the service account."""
+    shared_files = []
+    page_token = None
+    
+    while True:
+        try:
+            # Query for files shared with the service account
+            response = service.files().list(
+                q="sharedWithMe=true and trashed=false",
+                spaces='drive',
+                fields='nextPageToken, files(id, name, mimeType, createdTime, modifiedTime, size, webViewLink, permissions, parents)',
+                pageToken=page_token,
+                pageSize=100
+            ).execute()
+            
+            items = response.get('files', [])
+            if not items:
+                break
+                
+            for item in items:
+                # Get detailed permissions
+                try:
+                    perms = service.permissions().list(
+                        fileId=item['id'], 
+                        fields="permissions(id,type,emailAddress,role,domain)"
+                    ).execute()
+                    item['detailed_permissions'] = perms.get('permissions', [])
+                    shared_files.append(item)
+                except Exception as e:
+                    context.log.warning(f"Error getting permissions for {item['name']}: {e}")
+            
+            page_token = response.get('nextPageToken')
+            if not page_token:
+                break
+                
+        except HttpError as error:
+            context.log.error(f"Error listing shared resources: {error}")
+            break
+            
+    return shared_files
+
 @asset(deps=[google_drive_service])
 def google_drive_files(context: AssetExecutionContext, config: GoogleDriveConfig, google_drive_service):
     """Fetch files from Google Drive folders with permissions."""
     service = google_drive_service
     
+    # Get all shared resources
+    shared_files = list_shared_resources(service, context)
     all_files = []
     total_size = 0
     
-    # Use provided folder IDs or fall back to "root"
-    folder_ids = config.folder_ids if config.folder_ids else ['root']
-    
-    for folder_id in folder_ids:
+    # Process each shared file
+    for file in shared_files:
         try:
-            # Use the recursive function to fetch files
-            folder_files = fetch_files_recursive(service, folder_id, context, config)
-            
-            # Add size information
-            for file in folder_files:
+            # If it's a folder and recursive is enabled, process it recursively
+            if file['mimeType'] == 'application/vnd.google-apps.folder' and config.recursive:
+                folder_files = fetch_files_recursive(service, file['id'], context, config)
+                all_files.extend(folder_files)
+            # For files, check if they match the supported file types
+            elif any(file['name'].endswith(ext) for ext in config.file_types):
+                all_files.append(file)
                 total_size += int(file.get('size', 0))
                 
-            # Add files to our collection
-            all_files.extend(folder_files)
-            
-            context.log.info(f"Found {len(folder_files)} files in folder {folder_id} and its subfolders")
-            
         except HttpError as error:
-            context.log.error(f"Error accessing folder {folder_id}: {error}")
+            context.log.error(f"Error processing file {file.get('name', 'unknown')}: {error}")
     
     context.add_output_metadata({
         "num_files": len(all_files),
