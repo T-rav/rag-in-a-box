@@ -48,11 +48,22 @@ This directory contains setup instructions and credential files for various inte
 ### Set Up Bot Permissions
 1. In the left sidebar, click "OAuth & Permissions"
 2. Under "Scopes", add the following bot token scopes:
-   - `chat:write` (to send messages)
-   - `channels:read` (to get channel information)
-   - `channels:join` (to join channels)
-   - `users:read` (to read user profiles)
-   - `users:read.email` (to read user email addresses)
+
+#### Basic Permissions
+- `chat:write` (to send messages)
+- `channels:read` (to get channel information)
+- `channels:join` (to join channels)
+- `users:read` (to read user profiles)
+- `users:read.email` (to read user email addresses)
+
+#### Content Access Permissions
+- `canvases:read` (access contents of Slack canvases)
+- `files:read` (view files shared in channels)
+- `metadata.message:read` (read message metadata)
+- `pins:read` (view pinned content)
+- `reactions:read` (view emoji reactions)
+- `bookmarks:read` (list bookmarks)
+
 3. Scroll up and click "Install to Workspace"
 4. Copy the "Bot User OAuth Token" (starts with `xoxb-`)
 
@@ -97,6 +108,15 @@ The `slack_users` table in PostgreSQL will have the following structure:
 - Keep your bot token secure
 - Monitor bot activity and permissions
 - Regularly review and update scopes
+- Be aware that the bot can now access:
+  - Canvas contents
+  - Shared files
+  - Message metadata
+  - Pinned content
+  - Reaction data
+  - Channel bookmarks
+- Ensure proper data handling and storage policies are in place for this additional content
+- Consider implementing data retention policies for bookmarks and other content
 
 ### Database Security
 - Ensure your PostgreSQL connection string is properly secured
