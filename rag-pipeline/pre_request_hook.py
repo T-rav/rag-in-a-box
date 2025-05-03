@@ -5,6 +5,14 @@ import logging
 import requests
 import json
 import os
+import redis
+import jwt
+import psycopg2
+from psycopg2.extras import DictCursor
+import base64
+
+# TODO: Implement OpenWebUI integration to fetch user email based on the ID in the JWT token
+# TODO: Cache email lookups in Redis to avoid repeated API calls to OpenWebUI
 
 # Set up logging
 logging.basicConfig(level=logging.INFO)
@@ -14,7 +22,188 @@ logger = logging.getLogger(__name__)
 HAYSTACK_ENDPOINT = os.environ.get("HAYSTACK_ENDPOINT", "http://haystack:8000/search")
 MAX_RESULTS = int(os.environ.get("HAYSTACK_MAX_RESULTS", "3"))
 
-# todo : patch the litellm method that calls this to pass the auth token down to the rag handler
+# Redis configuration for caching
+REDIS_URL = os.environ.get("REDIS_URL", "redis://redis:6379/0")
+REDIS_TTL = int(os.environ.get("REDIS_TTL", "3600"))  # Cache TTL in seconds (1 hour default)
+REDIS_ENABLED = os.environ.get("REDIS_ENABLED", "true").lower() == "true"
+
+# Database configuration for user lookup
+DB_HOST = os.environ.get("DB_HOST", "postgres")
+DB_PORT = os.environ.get("DB_PORT", "5432")
+DB_NAME = os.environ.get("DB_NAME", "openwebui")
+DB_USER = os.environ.get("DB_USER", "postgres")
+DB_PASSWORD = os.environ.get("DB_PASSWORD", "postgres")
+DB_TABLE = os.environ.get("DB_USER_TABLE", "users")  # The table containing user data
+
+# Initialize Redis client if enabled
+redis_client = None
+if REDIS_ENABLED:
+    try:
+        redis_client = redis.from_url(REDIS_URL)
+        logger.info(f"Connected to Redis at {REDIS_URL}")
+    except Exception as e:
+        logger.error(f"Failed to connect to Redis: {e}")
+
+def get_db_connection():
+    """
+    Create a connection to the PostgreSQL database
+    """
+    try:
+        connection = psycopg2.connect(
+            host=DB_HOST,
+            port=DB_PORT,
+            database=DB_NAME,
+            user=DB_USER,
+            password=DB_PASSWORD
+        )
+        logger.info(f"Connected to PostgreSQL database at {DB_HOST}:{DB_PORT}/{DB_NAME}")
+        return connection
+    except Exception as e:
+        logger.error(f"Database connection error: {e}")
+        return None
+
+def get_cached_email(user_id: str) -> Optional[str]:
+    """
+    Get email from Redis cache by user ID
+    """
+    if not redis_client:
+        return None
+        
+    try:
+        cache_key = f"user_email:{user_id}"
+        cached_email = redis_client.get(cache_key)
+        if cached_email:
+            email = cached_email.decode('utf-8')
+            logger.info(f"Cache hit: Found email {email} for user ID {user_id}")
+            return email
+        return None
+    except Exception as e:
+        logger.error(f"Error accessing Redis cache: {e}")
+        return None
+
+def cache_email(user_id: str, email: str) -> bool:
+    """
+    Store email in Redis cache with TTL
+    """
+    if not redis_client or not email:
+        return False
+        
+    try:
+        cache_key = f"user_email:{user_id}"
+        redis_client.setex(cache_key, REDIS_TTL, email)
+        logger.info(f"Cached email {email} for user ID {user_id} for {REDIS_TTL} seconds")
+        return True
+    except Exception as e:
+        logger.error(f"Error writing to Redis cache: {e}")
+        return False
+
+def get_user_email_from_db(user_id: str) -> Optional[str]:
+    """
+    Get user email from database by user ID
+    """
+    if not user_id:
+        return None
+        
+    try:
+        # First check cache
+        cached_email = get_cached_email(user_id)
+        if cached_email:
+            return cached_email
+            
+        # Connect to the database
+        conn = get_db_connection()
+        if not conn:
+            logger.error("Failed to connect to database for user lookup")
+            return None
+            
+        try:
+            with conn.cursor(cursor_factory=DictCursor) as cursor:
+                # Query to get user email by ID
+                query = f"SELECT email FROM {DB_TABLE} WHERE id = %s"
+                cursor.execute(query, (user_id,))
+                result = cursor.fetchone()
+                
+                if result and result['email']:
+                    email = result['email']
+                    logger.info(f"Found email {email} for user ID {user_id} in database")
+                    
+                    # Cache the result
+                    cache_email(user_id, email)
+                    return email
+                else:
+                    logger.warning(f"User ID {user_id} not found in database or has no email")
+                    return None
+        finally:
+            conn.close()
+            
+    except Exception as e:
+        logger.error(f"Error looking up user email in database: {e}")
+        return None
+
+def extract_user_info_from_token(auth_header: str) -> dict:
+    """
+    Extract user information from the authorization header
+    
+    Args:
+        auth_header: The HTTP Authorization header value
+        
+    Returns:
+        Dict with user_id, email, domain information
+    """
+    user_info = {
+        "user_id": None,
+        "email": None,
+        "domain": None
+    }
+    
+    if not auth_header:
+        return user_info
+    
+    try:
+        # Extract token part
+        if auth_header.startswith("Bearer "):
+            token = auth_header[7:]
+        else:
+            token = auth_header
+            
+        try:
+            # Use verify=False for tokens you can't verify
+            decoded = jwt.decode(token, options={"verify_signature": False})
+            
+            # Extract user info from decoded token
+            user_info["user_id"] = decoded.get("sub") or decoded.get("id")
+            user_info["email"] = decoded.get("email")
+                
+        except jwt.PyJWTError as e:
+            # If JWT decoding fails, try manual base64 decoding as fallback
+            logger.warning(f"JWT decode error: {e}, trying manual decode")
+            
+            # JWT tokens have three parts separated by dots
+            parts = token.split('.')
+            if len(parts) >= 2:
+                # The payload is the second part
+                padded = parts[1] + '=' * (4 - len(parts[1]) % 4)
+                try:
+                    payload = json.loads(base64.b64decode(padded).decode('utf-8'))
+                    user_info["user_id"] = payload.get("sub") or payload.get("id")
+                    user_info["email"] = payload.get("email")
+                except Exception as decode_err:
+                    logger.error(f"Error in manual token decoding: {decode_err}")
+                    
+        # If we have a user ID but no email, look it up in the database
+        if user_info["user_id"] and not user_info["email"]:
+            logger.info(f"Looking up email for user ID: {user_info['user_id']}")
+            user_info["email"] = get_user_email_from_db(user_info["user_id"])
+            
+        # Extract domain from email
+        if user_info["email"] and "@" in user_info["email"]:
+            user_info["domain"] = user_info["email"].split("@")[1]
+                    
+    except Exception as e:
+        logger.error(f"Error extracting user info from token: {e}")
+    
+    return user_info
+
 class RAGHandler(CustomLogger):
     def __init__(self):
         pass
@@ -31,6 +220,13 @@ class RAGHandler(CustomLogger):
             headers = data.get("proxy_server_request", {}).get("headers", {})
             logger.info("=== RAG PRE-REQUEST HOOK CALLED ===")
             logger.info(f"Headers received: {headers}")
+            
+            # Get authorization header if available
+            auth_header = headers.get("authorization", "")
+            
+            # Extract user information from the token
+            user_info = extract_user_info_from_token(auth_header)
+            logger.info(f"User info extracted: {user_info}")
             
             # Only process completion requests
             if call_type != "completion":
@@ -49,10 +245,11 @@ class RAGHandler(CustomLogger):
             latest_user_message = user_messages[-1]
             query = latest_user_message.get("content", "")
             
-            # Get authorization header if available
-            auth_header = headers.get("authorization", "")
-            
-            # Call Haystack search endpoint
+            # Call Haystack search endpoint with user authorization
+            search_headers = {}
+            if auth_header:
+                search_headers["Authorization"] = auth_header
+                
             rag_context = self.get_search_results(query, auth_header)
             
             # Create a system message with the RAG context if it doesn't exist

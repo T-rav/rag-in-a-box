@@ -9,11 +9,11 @@
 - [ ] Update pre_request_hook to receive auth headers
 - [ ] Test header propagation
 
-## 3. Dragster Integration
-- [ ] Set up Dragster API
-- [ ] Configure document indexing
-- [ ] Implement document retrieval endpoints
-- [ ] Test integration with pre_request_hook
+## 3. Dagster Integration
+- [ ] Install and configure Dagster
+- [ ] Set up Google Drive service account
+- [ ] Configure document indexing pipeline
+- [ ] Test end-to-end with Haystack
 
 ## 4. Haystack Integration
 - [ ] Set up Haystack pipeline

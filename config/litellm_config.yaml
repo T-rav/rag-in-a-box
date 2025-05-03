@@ -39,5 +39,5 @@ rate_limits:
 litellm_settings:
   num_retries: 3
   request_timeout: 30
-  callbacks: rag-pipeline.pre_request_hook.rag_handler_instance
+  # callbacks: rag-pipeline.pre_request_hook.rag_handler_instance
   forward_client_headers_to_llm_api: true

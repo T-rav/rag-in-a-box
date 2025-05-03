@@ -6,6 +6,9 @@ __pycache__/
 *.py[cod]
 *$py.class
 
+plugins/
+*.db
+
 # C extensions
 *.so
 
@@ -175,3 +178,10 @@ cython_debug/
 
 # PyPI configuration file
 .pypirc
+credentials/credentials.json
+*.err
+*.out
+*.complete
+google_drive_files
+google_drive_service
+index_files
