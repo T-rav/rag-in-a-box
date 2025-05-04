@@ -49,12 +49,12 @@ class GoogleDriveConfig(Config):
 es = Elasticsearch(
     hosts=[{
         'scheme': 'http',
-        'host': os.getenv("ELASTICSEARCH_HOST", "elasticsearch"),
+        'host': os.getenv("ELASTICSEARCH_HOST", "localhost"),
         'port': int(os.getenv("ELASTICSEARCH_PORT", "9200"))
     }]
 )
 neo4j_driver = GraphDatabase.driver(
-    os.getenv("NEO4J_URI", "bolt://neo4j:7687"),
+    os.getenv("NEO4J_URI", "bolt://localhost:7687"),
     auth=(
         os.getenv("NEO4J_USER", "neo4j"),
         os.getenv("NEO4J_PASSWORD", "password")

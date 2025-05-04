@@ -14,6 +14,7 @@ import hashlib
 import logging
 import re
 from urllib.parse import urlparse
+import time
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -30,53 +31,98 @@ class SlackConfig(Config):
     max_recursion_depth: int = 5
 
 class SlackClient:
-    def __init__(self, token: Optional[str] = None):
+    def __init__(self, token: Optional[str] = None, rate_limit_delay: float = 1.0):
         self.token = token or os.getenv("SLACK_BOT_TOKEN")
         if not self.token:
             raise ValueError("Slack bot token not found. Please set SLACK_BOT_TOKEN environment variable or pass token directly.")
         self.client = WebClient(token=self.token)
         self.logger = logging.getLogger(__name__)
+        self.rate_limit_delay = rate_limit_delay
+
+    def _to_dict(self, obj):
+        """Convert a Slack response object to a dictionary."""
+        if hasattr(obj, 'data'):
+            return obj.data
+        elif isinstance(obj, dict):
+            return {k: self._to_dict(v) for k, v in obj.items()}
+        elif isinstance(obj, list):
+            return [self._to_dict(item) for item in obj]
+        return obj
+
+    def _flatten_dict(self, d: Dict[str, Any], parent_key: str = '', sep: str = '_') -> Dict[str, Any]:
+        """Flatten a nested dictionary by concatenating keys with a separator."""
+        items = []
+        for k, v in d.items():
+            new_key = f"{parent_key}{sep}{k}" if parent_key else k
+            if isinstance(v, dict):
+                items.extend(self._flatten_dict(v, new_key, sep=sep).items())
+            elif isinstance(v, list):
+                # Convert list to string representation
+                items.append((new_key, json.dumps(v)))
+            else:
+                items.append((new_key, v))
+        return dict(items)
+
+    def _handle_rate_limit(self, e: SlackApiError) -> None:
+        """Handle rate limiting by waiting and retrying."""
+        if e.response['error'] == 'ratelimited':
+            retry_after = int(e.response.headers.get('Retry-After', self.rate_limit_delay))
+            self.logger.warning(f"Rate limited. Waiting {retry_after} seconds...")
+            time.sleep(retry_after)
+            return True
+        return False
+
+    def _make_slack_call(self, call_func, *args, **kwargs):
+        """Make a Slack API call with rate limit handling."""
+        max_retries = 3
+        current_retry = 0
+        
+        while current_retry < max_retries:
+            try:
+                response = call_func(*args, **kwargs)
+                time.sleep(self.rate_limit_delay)  # Add delay between calls
+                return response
+            except SlackApiError as e:
+                if self._handle_rate_limit(e):
+                    current_retry += 1
+                    continue
+                raise
+        
+        raise SlackApiError("Max retries exceeded for rate limiting", None)
 
     def send_message(self, channel: str, text: str, blocks: Optional[list] = None) -> Dict[str, Any]:
         """Send a message to a Slack channel."""
-        try:
-            response = self.client.chat_postMessage(
-                channel=channel,
-                text=text,
-                blocks=blocks
-            )
-            return response.data
-        except SlackApiError as e:
-            print(f"Error sending message: {e.response['error']}")
-            raise
+        return self._make_slack_call(
+            self.client.chat_postMessage,
+            channel=channel,
+            text=text,
+            blocks=blocks
+        )
 
     def get_channel_info(self, channel: str) -> Dict[str, Any]:
         """Get information about a Slack channel."""
-        try:
-            response = self.client.conversations_info(channel=channel)
-            return response.data
-        except SlackApiError as e:
-            print(f"Error getting channel info: {e.response['error']}")
-            raise
+        return self._make_slack_call(
+            self.client.conversations_info,
+            channel=channel
+        )
 
     def get_users(self) -> List[Dict[str, Any]]:
         """Get all users from the Slack workspace."""
-        try:
-            users = []
-            cursor = None
+        users = []
+        cursor = None
+        
+        while True:
+            response = self._make_slack_call(
+                self.client.users_list,
+                cursor=cursor
+            )
+            users.extend(response['members'])
             
-            while True:
-                response = self.client.users_list(cursor=cursor)
-                users.extend(response['members'])
-                
-                cursor = response.get('response_metadata', {}).get('next_cursor')
-                if not cursor:
-                    break
-            
-            return users
-        except SlackApiError as e:
-            print(f"Error getting users: {e.response['error']}")
-            raise
+            cursor = response.get('response_metadata', {}).get('next_cursor')
+            if not cursor:
+                break
+        
+        return users
 
     def get_user_emails(self) -> List[Dict[str, str]]:
         """Get user emails from the Slack workspace."""
@@ -97,33 +143,41 @@ class SlackClient:
 
     def get_public_channels(self) -> List[Dict[str, Any]]:
         """Get all public channels in the workspace."""
-        try:
-            channels = []
-            cursor = None
+        channels = []
+        cursor = None
+        
+        while True:
+            self.logger.info(f"Fetching channels batch (cursor: {cursor})")
+            response = self._make_slack_call(
+                self.client.conversations_list,
+                types="public_channel",
+                cursor=cursor,
+                limit=1000
+            )
+            channels.extend(response['channels'])
+            self.logger.info(f"Found {len(response['channels'])} channels in this batch")
             
-            while True:
-                self.logger.info(f"Fetching channels batch (cursor: {cursor})")
-                response = self.client.conversations_list(
-                    types="public_channel",
-                    cursor=cursor,
-                    limit=1000
-                )
-                channels.extend(response['channels'])
-                self.logger.info(f"Found {len(response['channels'])} channels in this batch")
-                
-                cursor = response.get('response_metadata', {}).get('next_cursor')
-                if not cursor:
-                    break
-            
-            self.logger.info(f"Total public channels found: {len(channels)}")
-            return channels
-        except SlackApiError as e:
-            self.logger.error(f"Error getting channels: {e.response['error']}")
-            raise
+            cursor = response.get('response_metadata', {}).get('next_cursor')
+            if not cursor:
+                break
+        
+        self.logger.info(f"Total public channels found: {len(channels)}")
+        return channels
 
     def get_channel_messages(self, channel_id: str, oldest: Optional[str] = None, config: Optional[SlackConfig] = None) -> List[Dict[str, Any]]:
         """Get messages from a channel with reactions and metadata."""
         try:
+            # Join the channel if not already a member
+            try:
+                self._make_slack_call(
+                    self.client.conversations_join,
+                    channel=channel_id
+                )
+                self.logger.info(f"Joined channel {channel_id}")
+            except SlackApiError as e:
+                if e.response['error'] != 'already_in_channel':
+                    raise
+            
             messages = []
             cursor = None
             messages_processed = 0
@@ -134,7 +188,8 @@ class SlackClient:
                     break
 
                 self.logger.info(f"Fetching messages batch for channel {channel_id} (cursor: {cursor})")
-                response = self.client.conversations_history(
+                response = self._make_slack_call(
+                    self.client.conversations_history,
                     channel=channel_id,
                     cursor=cursor,
                     limit=min(100, config.max_messages_per_channel - messages_processed) if config else 100,
@@ -148,7 +203,8 @@ class SlackClient:
                     # Get message reactions if enabled
                     if config and config.include_reactions:
                         try:
-                            reactions = self.client.reactions_get(
+                            reactions = self._make_slack_call(
+                                self.client.reactions_get,
                                 channel=channel_id,
                                 timestamp=message['ts']
                             )
@@ -160,7 +216,8 @@ class SlackClient:
                     # Get thread replies if enabled
                     if config and config.include_threads and message.get('thread_ts'):
                         try:
-                            thread = self.client.conversations_replies(
+                            thread = self._make_slack_call(
+                                self.client.conversations_replies,
                                 channel=channel_id,
                                 ts=message['thread_ts']
                             )
@@ -208,7 +265,10 @@ class SlackClient:
     def get_channel_pins(self, channel_id: str) -> List[Dict[str, Any]]:
         """Get pinned items from a channel with full content."""
         try:
-            response = self.client.pins_list(channel=channel_id)
+            response = self._make_slack_call(
+                self.client.pins_list,
+                channel=channel_id
+            )
             pins = []
             
             for item in response['items']:
@@ -223,7 +283,8 @@ class SlackClient:
                 # Get full content based on type
                 if item['type'] == 'message':
                     try:
-                        message = self.client.conversations_history(
+                        message = self._make_slack_call(
+                            self.client.conversations_history,
                             channel=channel_id,
                             latest=item['message']['ts'],
                             limit=1,
@@ -236,7 +297,10 @@ class SlackClient:
                 
                 elif item['type'] == 'file':
                     try:
-                        file_info = self.client.files_info(file=item['file']['id'])
+                        file_info = self._make_slack_call(
+                            self.client.files_info,
+                            file=item['file']['id']
+                        )
                         pin_data['content'] = file_info['file']
                     except SlackApiError as e:
                         self.logger.warning(f"Could not get pinned file content: {e}")
@@ -251,7 +315,10 @@ class SlackClient:
     def get_channel_bookmarks(self, channel_id: str) -> List[Dict[str, Any]]:
         """Get bookmarks from a channel with full content."""
         try:
-            response = self.client.bookmarks_list(channel=channel_id)
+            response = self._make_slack_call(
+                self.client.bookmarks_list,
+                channel_id=channel_id
+            )
             bookmarks = []
             
             for bookmark in response['bookmarks']:
@@ -270,7 +337,8 @@ class SlackClient:
                 # Get full content based on type
                 if bookmark.get('type') == 'message':
                     try:
-                        message = self.client.conversations_history(
+                        message = self._make_slack_call(
+                            self.client.conversations_history,
                             channel=channel_id,
                             latest=bookmark['entity_id'],
                             limit=1,
@@ -283,7 +351,10 @@ class SlackClient:
                 
                 elif bookmark.get('type') == 'file':
                     try:
-                        file_info = self.client.files_info(file=bookmark['entity_id'])
+                        file_info = self._make_slack_call(
+                            self.client.files_info,
+                            file=bookmark['entity_id']
+                        )
                         bookmark_data['content'] = file_info['file']
                     except SlackApiError as e:
                         self.logger.warning(f"Could not get bookmarked file content: {e}")
@@ -298,12 +369,18 @@ class SlackClient:
     def get_canvas_content(self, canvas_id: str) -> Dict[str, Any]:
         """Get content of a Slack canvas with detailed metadata."""
         try:
-            response = self.client.canvases_read(canvas_id=canvas_id)
+            response = self._make_slack_call(
+                self.client.canvases_read,
+                canvas_id=canvas_id
+            )
             canvas = response['canvas']
             
             # Get canvas comments if any
             try:
-                comments = self.client.canvases_comments_list(canvas_id=canvas_id)
+                comments = self._make_slack_call(
+                    self.client.canvases_comments_list,
+                    canvas_id=canvas_id
+                )
                 canvas['comments'] = comments.get('comments', [])
             except SlackApiError:
                 canvas['comments'] = []
@@ -316,12 +393,18 @@ class SlackClient:
     def get_file_info(self, file_id: str) -> Dict[str, Any]:
         """Get detailed information about a shared file."""
         try:
-            response = self.client.files_info(file=file_id)
+            response = self._make_slack_call(
+                self.client.files_info,
+                file=file_id
+            )
             file_info = response['file']
             
             # Get file comments if any
             try:
-                comments = self.client.files_comments_list(file=file_id)
+                comments = self._make_slack_call(
+                    self.client.files_comments_list,
+                    file=file_id
+                )
                 file_info['comments'] = comments.get('comments', [])
             except SlackApiError:
                 file_info['comments'] = []
@@ -335,7 +418,8 @@ class SlackClient:
         """Get detailed permissions and access information for a channel."""
         try:
             # Get channel info with all available fields
-            channel_info = self.client.conversations_info(
+            channel_info = self._make_slack_call(
+                self.client.conversations_info,
                 channel=channel_id,
                 include_num_members=True
             ).get('channel', {})
@@ -344,7 +428,8 @@ class SlackClient:
             members = []
             cursor = None
             while True:
-                response = self.client.conversations_members(
+                response = self._make_slack_call(
+                    self.client.conversations_members,
                     channel=channel_id,
                     cursor=cursor,
                     limit=1000
@@ -370,15 +455,132 @@ class SlackClient:
             self.logger.error(f"Error getting channel permissions: {e.response['error']}")
             raise
 
+    def store_channel_data(self, channel_id: str, channel_info: Dict[str, Any], messages: List[Dict[str, Any]], pins: List[Dict[str, Any]], bookmarks: List[Dict[str, Any]], permissions: Dict[str, Any]):
+        """Store channel data in Neo4j and Elasticsearch."""
+        try:
+            # Initialize connections
+            neo4j_driver = GraphDatabase.driver(
+                os.getenv("NEO4J_URI", "bolt://localhost:7687"),
+                auth=(os.getenv("NEO4J_USER", "neo4j"), os.getenv("NEO4J_PASSWORD", "password"))
+            )
+            es = Elasticsearch([{
+                'scheme': 'http',
+                'host': os.getenv("ELASTICSEARCH_HOST", "localhost"),
+                'port': int(os.getenv("ELASTICSEARCH_PORT", "9200"))
+            }])
+
+            # Convert all data to dictionaries
+            channel_info = self._to_dict(channel_info)
+            messages = self._to_dict(messages)
+            pins = self._to_dict(pins)
+            bookmarks = self._to_dict(bookmarks)
+            permissions = self._to_dict(permissions)
+
+            # Flatten nested dictionaries for Neo4j
+            flattened_channel_info = self._flatten_dict(channel_info)
+            flattened_messages = [self._flatten_dict(m) for m in messages]
+            flattened_pins = [self._flatten_dict(p) for p in pins]
+            flattened_bookmarks = [self._flatten_dict(b) for b in bookmarks]
+            flattened_permissions = self._flatten_dict(permissions)
+
+            # Store in Neo4j
+            with neo4j_driver.session() as session:
+                # Store channel info
+                session.run(
+                    """
+                    MERGE (c:Channel {id: $id})
+                    SET c += $properties
+                    """,
+                    id=channel_id,
+                    properties=flattened_channel_info
+                )
+
+                # Store messages
+                for message in flattened_messages:
+                    session.run(
+                        """
+                        MERGE (m:Message {id: $message_id})
+                        SET m += $properties
+                        WITH m
+                        MATCH (c:Channel {id: $channel_id})
+                        MERGE (m)-[:IN_CHANNEL]->(c)
+                        """,
+                        message_id=message['ts'],
+                        properties=message,
+                        channel_id=channel_id
+                    )
+
+                # Store pins
+                for pin in flattened_pins:
+                    session.run(
+                        """
+                        MERGE (p:Pin {id: $pin_id})
+                        SET p += $properties
+                        WITH p
+                        MATCH (c:Channel {id: $channel_id})
+                        MERGE (p)-[:IN_CHANNEL]->(c)
+                        """,
+                        pin_id=pin['id'],
+                        properties=pin,
+                        channel_id=channel_id
+                    )
+
+                # Store bookmarks
+                for bookmark in flattened_bookmarks:
+                    session.run(
+                        """
+                        MERGE (b:Bookmark {id: $bookmark_id})
+                        SET b += $properties
+                        WITH b
+                        MATCH (c:Channel {id: $channel_id})
+                        MERGE (b)-[:IN_CHANNEL]->(c)
+                        """,
+                        bookmark_id=bookmark['id'],
+                        properties=bookmark,
+                        channel_id=channel_id
+                    )
+
+            # Store in Elasticsearch (can handle nested structures)
+            es.index(
+                index="slack_channels",
+                id=channel_id,
+                document={
+                    "info": channel_info,
+                    "messages": messages,
+                    "pins": pins,
+                    "bookmarks": bookmarks,
+                    "permissions": permissions
+                }
+            )
+
+            self.logger.info(f"Successfully stored data for channel {channel_id}")
+        except Exception as e:
+            self.logger.error(f"Error storing channel data: {e}")
+            raise
+
 class SlackScraper:
     def __init__(self, slack_client: SlackClient):
         self.slack = slack_client
         self.neo4j_driver = GraphDatabase.driver(
-            os.getenv("NEO4J_URI"),
-            auth=(os.getenv("NEO4J_USER"), os.getenv("NEO4J_PASSWORD"))
+            os.getenv("NEO4J_URI", "bolt://localhost:7687"),
+            auth=(os.getenv("NEO4J_USER", "neo4j"), os.getenv("NEO4J_PASSWORD", "password"))
         )
-        self.es = Elasticsearch([os.getenv("ELASTICSEARCH_URI")])
+        self.es = Elasticsearch([{
+            'scheme': 'http',
+            'host': os.getenv("ELASTICSEARCH_HOST", "localhost"),
+            'port': int(os.getenv("ELASTICSEARCH_PORT", "9200"))
+        }])
         self.logger = logging.getLogger(__name__)
+
+    def _to_dict(self, obj):
+        """Convert a Slack response object to a dictionary."""
+        if hasattr(obj, 'data'):
+            return obj.data
+        elif isinstance(obj, dict):
+            return {k: self._to_dict(v) for k, v in obj.items()}
+        elif isinstance(obj, list):
+            return [self._to_dict(item) for item in obj]
+        return obj
 
     def _generate_document_id(self, source: str, id: str) -> str:
         """Generate a unique document ID for Elasticsearch."""
@@ -387,6 +589,9 @@ class SlackScraper:
     def _store_in_neo4j(self, data: Dict[str, Any], node_type: str, relationships: Optional[List[Dict[str, Any]]] = None):
         """Store data in Neo4j with detailed logging and relationships."""
         try:
+            # Convert data to dictionary if it's a Slack response
+            data = self._to_dict(data)
+            
             with self.neo4j_driver.session() as session:
                 # Create or update node
                 query = f"""
@@ -421,6 +626,9 @@ class SlackScraper:
     def _store_in_elasticsearch(self, data: Dict[str, Any], index: str):
         """Store data in Elasticsearch with detailed logging."""
         try:
+            # Convert data to dictionary if it's a Slack response
+            data = self._to_dict(data)
+            
             doc_id = self._generate_document_id(index, data['id'])
             result = self.es.index(index=index, id=doc_id, document=data)
             self.logger.info(f"Stored document in {index} with ID {doc_id}")
@@ -435,12 +643,12 @@ class SlackScraper:
         self.logger.info(f"Starting to scrape channel: {channel['name']} ({channel_id})")
         
         # Get channel permissions and store with relationships
-        permissions = self.slack.get_channel_permissions(channel_id)
+        permissions = self._to_dict(self.slack.get_channel_permissions(channel_id))
         self._store_in_neo4j(permissions, 'Channel')
         self._store_in_elasticsearch(permissions, 'slack_channels')
         
         # Get channel messages
-        messages = self.slack.get_channel_messages(channel_id, config=config)
+        messages = self._to_dict(self.slack.get_channel_messages(channel_id, config=config))
         for message in messages:
             # Store message with channel relationship
             message_data = {
@@ -511,7 +719,7 @@ class SlackScraper:
             # Process files if present
             if config.include_files and 'files' in message:
                 for file in message['files']:
-                    file_info = self.slack.get_file_info(file['id'])
+                    file_info = self._to_dict(self.slack.get_file_info(file['id']))
                     self._store_in_neo4j(
                         file_info,
                         'File',
@@ -540,7 +748,7 @@ class SlackScraper:
             if config.include_canvases and 'blocks' in message:
                 for block in message['blocks']:
                     if block.get('type') == 'canvas':
-                        canvas_info = self.slack.get_canvas_content(block['canvas_id'])
+                        canvas_info = self._to_dict(self.slack.get_canvas_content(block['canvas_id']))
                         self._store_in_neo4j(
                             canvas_info,
                             'Canvas',
@@ -566,7 +774,7 @@ class SlackScraper:
                         self._store_in_elasticsearch(canvas_info, 'slack_canvases')
 
         # Get channel pins with full content
-        pins = self.slack.get_channel_pins(channel_id)
+        pins = self._to_dict(self.slack.get_channel_pins(channel_id))
         for pin in pins:
             pin_data = {
                 'id': pin['id'],
@@ -593,7 +801,7 @@ class SlackScraper:
             self._store_in_elasticsearch(pin_data, 'slack_pins')
 
         # Get channel bookmarks with full content
-        bookmarks = self.slack.get_channel_bookmarks(channel_id)
+        bookmarks = self._to_dict(self.slack.get_channel_bookmarks(channel_id))
         for bookmark in bookmarks:
             bookmark_data = {
                 'id': bookmark['id'],
@@ -622,6 +830,13 @@ class SlackScraper:
                 ]
             )
             self._store_in_elasticsearch(bookmark_data, 'slack_bookmarks')
+
+        # Get channel info and store it
+        channel_info_response = self._to_dict(self.slack.get_channel_info(channel_id))
+        channel_info = channel_info_response['channel']
+        channel_info['id'] = channel_id
+        self._store_in_neo4j(channel_info, 'Channel')
+        self._store_in_elasticsearch(channel_info, 'slack_channels')
 
         self.logger.info(f"Completed scraping channel: {channel['name']}")
 
