@@ -11,6 +11,7 @@ import PyPDF2
 from io import BytesIO
 from pdfminer.high_level import extract_text as pdfminer_extract_text
 from pdfminer.pdfparser import PDFSyntaxError
+import time
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -134,14 +135,58 @@ class WebScraper:
     def _extract_links(self, soup: BeautifulSoup, base_url: str) -> List[Dict[str, str]]:
         """Extract and validate links from the page."""
         links = []
+        
+        # First, look for navigation menus
+        nav_links = soup.find_all(['nav', 'ul', 'li'], class_=['nav', 'dropdown', 'menu'])
+        for nav in nav_links:
+            for a in nav.find_all("a", href=True):
+                href = a["href"]
+                # Skip anchor links
+                if href.startswith("#"):
+                    continue
+                try:
+                    # Handle relative URLs
+                    if href.startswith("/"):
+                        href = f"{urlparse(base_url).scheme}://{urlparse(base_url).netloc}{href}"
+                    elif not href.startswith(("http://", "https://")):
+                        # Handle relative paths without leading slash
+                        base_path = urlparse(base_url).path
+                        if base_path.endswith("/"):
+                            href = f"{urlparse(base_url).scheme}://{urlparse(base_url).netloc}{base_path}{href}"
+                        else:
+                            href = f"{urlparse(base_url).scheme}://{urlparse(base_url).netloc}{base_path.rsplit('/', 1)[0]}/{href}"
+
+                    parsed = urlparse(href)
+                    if parsed.netloc == urlparse(base_url).netloc:  # Only include internal links
+                        link_data = {
+                            "url": href,
+                            "text": a.get_text(strip=True),
+                            "is_valid": True
+                        }
+                        if link_data not in links:
+                            links.append(link_data)
+                            if link_data not in self.all_links:
+                                self.all_links.append(link_data)
+                except Exception as e:
+                    self.logger.warning(f"Error parsing URL {href}: {e}")
+        
+        # Then look for all other links on the page
         for a in soup.find_all("a", href=True):
             href = a["href"]
+            # Skip anchor links
+            if href.startswith("#"):
+                continue
             try:
                 # Handle relative URLs
                 if href.startswith("/"):
                     href = f"{urlparse(base_url).scheme}://{urlparse(base_url).netloc}{href}"
                 elif not href.startswith(("http://", "https://")):
-                    continue
+                    # Handle relative paths without leading slash
+                    base_path = urlparse(base_url).path
+                    if base_path.endswith("/"):
+                        href = f"{urlparse(base_url).scheme}://{urlparse(base_url).netloc}{base_path}{href}"
+                    else:
+                        href = f"{urlparse(base_url).scheme}://{urlparse(base_url).netloc}{base_path.rsplit('/', 1)[0]}/{href}"
 
                 parsed = urlparse(href)
                 if parsed.netloc == urlparse(base_url).netloc:  # Only include internal links
@@ -150,11 +195,13 @@ class WebScraper:
                         "text": a.get_text(strip=True),
                         "is_valid": True
                     }
-                    links.append(link_data)
-                    if link_data not in self.all_links:
-                        self.all_links.append(link_data)
+                    if link_data not in links:
+                        links.append(link_data)
+                        if link_data not in self.all_links:
+                            self.all_links.append(link_data)
             except Exception as e:
                 self.logger.warning(f"Error parsing URL {href}: {e}")
+        
         return links
 
     def _extract_images(self, soup: BeautifulSoup, base_url: str) -> List[Dict[str, str]]:
@@ -238,12 +285,31 @@ class WebScraper:
 
     def scrape_page(self, url: str, depth: int = 0) -> Dict[str, Any]:
         """Scrape a single page and its content."""
-        if depth > self.config.max_depth or url in self.processed_urls:
+        if url in self.processed_urls:
             return {}
-
+            
+        # Remove fragment from URL if present
+        url = url.split('#')[0]
+            
+        # Calculate depth based on URL structure
+        parsed_url = urlparse(url)
+        base_path = urlparse(self.config.base_url).path.rstrip('/')
+        url_path = parsed_url.path.rstrip('/')
+        
+        # Remove the base path from the URL path to get the relative path
+        if url_path.startswith(base_path):
+            url_path = url_path[len(base_path):].lstrip('/')
+        
+        # Calculate depth based on path segments
+        path_segments = [s for s in url_path.split('/') if s]
+        current_depth = len(path_segments)
+        
+        if current_depth > self.config.max_depth:
+            return {}
+            
         self.processed_urls.add(url)
-        self.logger.info(f"Scraping page: {url} (depth: {depth})")
-
+        self.logger.info(f"Scraping page: {url} (depth: {current_depth})")
+        
         try:
             response = self.session.get(url)
             response.raise_for_status()
@@ -257,7 +323,7 @@ class WebScraper:
                     "url": url,
                     "title": pdf_data["title"] or url.split("/")[-1],
                     "content": pdf_data["content"],
-                    "depth": depth,
+                    "depth": current_depth,
                     "links": [],
                     "images": [],
                     "timestamp": response.headers.get("Last-Modified", ""),
@@ -276,7 +342,7 @@ class WebScraper:
                     "url": url,
                     "title": title,
                     "content": content,
-                    "depth": depth,
+                    "depth": current_depth,
                     "links": self._extract_links(soup, url) if self.config.include_links else [],
                     "images": self._extract_images(soup, url) if self.config.include_images else [],
                     "timestamp": response.headers.get("Last-Modified", ""),
@@ -305,11 +371,10 @@ class WebScraper:
 
             # Add to scraped pages
             self.scraped_pages.append(metadata)
-
+            
             # Recursively scrape linked pages
-            if depth < self.config.max_depth:
-                for link in metadata["links"]:
-                    self.scrape_page(link["url"], depth + 1)
+            for link in metadata["links"]:
+                self.scrape_page(link["url"])
 
             return metadata
 
