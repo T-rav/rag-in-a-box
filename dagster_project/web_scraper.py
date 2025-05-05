@@ -374,7 +374,9 @@ class WebScraper:
             
             # Recursively scrape linked pages
             for link in metadata["links"]:
-                self.scrape_page(link["url"])
+                next_url = link["url"].split('#')[0]
+                if next_url not in self.processed_urls:
+                    self.scrape_page(next_url)
 
             return metadata
 
