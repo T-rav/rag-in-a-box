@@ -1,0 +1,7 @@
+beautifulsoup4==4.12.3
+requests==2.31.0
+elasticsearch==8.12.1
+neo4j==5.17.0
+PyPDF2==3.0.1
+pdfminer.six==20231228
+dagster==1.6.6 
