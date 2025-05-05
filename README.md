@@ -1,14 +1,16 @@
 # Insight Mesh
 
-RAG stack for chat bots that aims to be a deploy, configure and go solution. 
+Search everything. Act on anything. Build smarter AI. A RAG stack that helps organizations unlock the value of their internal knowledge by turning search into a springboard for smarter automation—through chat, agent workflows, and direct access.
+
+Visit our website at [https://insightmesh.koderex.dev/](https://insightmesh.koderex.dev/) for more information about the project.
 
 ## Components
 
 🧠 OpenWebUI  -> The chat UI because why not!  
-🔄 LiteLLM Proxy	-> Monitor, Observe and Managae LLMOps centrally - make use of LangFuse to handle prompt managment     
-📊 Apache Airflow -> ETL and scheduling engine for data ingestion and pipeline orchestration
+🔄 LiteLLM Proxy	-> Monitor, Observe and Manage LLMOps centrally - make use of LangFuse to handle prompt management     
+📊 Dagster -> ETL and scheduling engine for data ingestion and pipeline orchestration  
 📚 RAG Pipeline	Python (your code) -> Custom RAG injection code loaded dynamically like a plugin _(Inject company data, do auth checks, add guardrails to make it safe and prod ready)_   
-🔍 Haystack	-> Data and agents layer for building powerful search and retrieval systems
+🔍 Elasticsearch & Neo4j -> Data and agents layer for building powerful search and retrieval systems
 🛡️ Caddy	Static binary (Go)	-> Auth Proxy to allow OpenWebUI and LiteLLM to centralize auth  
 
 **All you need to do is build the data pipelines to ingest and index**
@@ -87,10 +89,18 @@ To set up Google OAuth for authentication:
 
 To customize the RAG pipeline, you can:
 
-1. Configure Airflow DAGs for your ETL workflows and scheduling needs
-2. Modify the Haystack configuration for your specific data sources
+1. Configure Dagster assets for your ETL workflows and scheduling needs
+2. Modify the Elasticsearch and Neo4j configurations for your specific data sources
 3. Create custom retrieval pipelines in the `rag-pipeline` directory
-4. Connect your data sources to the system
+4. Connect your data sources to the system (currently supports Google Drive, with more integrations coming soon)
+
+## Data Sources
+
+### Google Drive Integration
+- Supports indexing of Google Docs, Sheets, and Slides
+- Maintains folder hierarchy in Neo4j
+- Handles permissions and access control
+- Automatic content updates through scheduled indexing
 
 ## License
 
