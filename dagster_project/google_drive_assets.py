@@ -23,10 +23,10 @@ from dagster import (
     AssetKey,
     EnvVar,
 )
-from dagster_project.google_drive.utils import compute_hash
-from dagster_project.google_drive.client import GoogleDriveClient
-from dagster_project.google_drive.neo4j_service import Neo4jService
-from dagster_project.google_drive.elastic_service import ElasticsearchService
+from google_drive.utils import compute_hash
+from google_drive.client import GoogleDriveClient
+from google_drive.neo4j_service import Neo4jService
+from google_drive.elastic_service import ElasticsearchService
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -287,31 +287,49 @@ def list_shared_resources(service, context):
 def google_drive_files(context: AssetExecutionContext, config: GoogleDriveConfig):
     """Fetch files and folders from Google Drive folders with permissions using GoogleDriveClient."""
     client = GoogleDriveClient(config.credentials_file)
+    all_files = []
+    all_folders = []
+    total_size = 0
+    processed_file_ids = set()  # Track processed file IDs to prevent duplicates
+
     # List shared resources (sharedWithMe=true)
     shared_files = client.list_files(
         query="sharedWithMe=true and trashed=false",
         fields="nextPageToken, files(id, name, mimeType, createdTime, modifiedTime, size, webViewLink)",
         page_size=100
     )
-    all_files = []
-    all_folders = []
-    total_size = 0
+
     if shared_files and shared_files.get('files'):
         for file in shared_files['files']:
             try:
+                file_id = file["id"]
+                # Skip if we've already processed this file
+                if file_id in processed_file_ids:
+                    context.log.info(f"Skipping duplicate file: {file['name']} (ID: {file_id})")
+                    continue
+                processed_file_ids.add(file_id)
+
                 mime_type = file["mimeType"]
                 if mime_type == "application/vnd.google-apps.folder" and config.recursive:
                     result = client.fetch_files_recursive(file["id"], context, config, parent_id=None)
-                    all_files.extend(result["files"])
+                    # Filter out any duplicate files from the recursive result
+                    for f in result["files"]:
+                        if f["id"] not in processed_file_ids:
+                            processed_file_ids.add(f["id"])
+                            all_files.append(f)
                     all_folders.extend(result["folders"])
-                elif mime_type in config.file_types or any(
-                    file["name"].endswith(ext) for ext in config.file_types if ext.startswith(".")
+                # Only add non-folder files that are directly shared (not part of a folder)
+                elif mime_type != "application/vnd.google-apps.folder" and (
+                    mime_type in config.file_types or any(
+                        file["name"].endswith(ext) for ext in config.file_types if ext.startswith(".")
+                    )
                 ):
                     file["parent_id"] = None
                     all_files.append(file)
                     total_size += int(file.get("size", 0))
             except HttpError as error:
                 context.log.error(f"Error processing file {file.get('name', 'unknown')}: {error}")
+
     context.add_output_metadata({
         "num_files": len(all_files),
         "num_folders": len(all_folders),
@@ -338,6 +356,7 @@ def index_files(
     drive_client = GoogleDriveClient(config.credentials_file)
     indexed_files = []
     failed_files = []
+    processed_file_ids = set()  # Track processed file IDs to prevent duplicates
 
     # Create all folders and their relationships in Neo4j
     for folder in folders:
@@ -347,6 +366,12 @@ def index_files(
     for file in files:
         try:
             file_id = file["id"]
+            # Skip if we've already processed this file
+            if file_id in processed_file_ids:
+                context.log.info(f"Skipping duplicate file: {file['name']} (ID: {file_id})")
+                continue
+            processed_file_ids.add(file_id)
+            
             file_name = file["name"]
             mime_type = file["mimeType"]
             # Use GoogleDriveClient for content fetching
