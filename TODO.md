@@ -30,8 +30,3 @@
   - Design endpoints for managing and visualizing business ops agents.
 - [ ] **Document API Contracts:**
   - Clearly document request/response formats and integration points.
-
-## Next Steps
-- [ ] Prioritize Slack integration or MCP server based on demo needs.
-- [ ] Assign owners and deadlines for each task.
-- [ ] Track progress in your project management tool. 
