@@ -1,6 +1,6 @@
 # Insight Mesh
 
-RAG stack for chat bots that aims to be a deploy, configure and go solution. 
+Search everything. Act on anything. Build smarter AI. A RAG stack that helps organizations unlock the value of their internal knowledge by turning search into a springboard for smarter automation—through chat, agent workflows, and direct access.
 
 Visit our website at [https://insightmesh.koderex.dev/](https://insightmesh.koderex.dev/) for more information about the project.
 
@@ -89,10 +89,18 @@ To set up Google OAuth for authentication:
 
 To customize the RAG pipeline, you can:
 
-1. Configure Airflow DAGs for your ETL workflows and scheduling needs
-2. Modify the Haystack configuration for your specific data sources
+1. Configure Dagster assets for your ETL workflows and scheduling needs
+2. Modify the Elasticsearch and Neo4j configurations for your specific data sources
 3. Create custom retrieval pipelines in the `rag-pipeline` directory
-4. Connect your data sources to the system
+4. Connect your data sources to the system (currently supports Google Drive, with more integrations coming soon)
+
+## Data Sources
+
+### Google Drive Integration
+- Supports indexing of Google Docs, Sheets, and Slides
+- Maintains folder hierarchy in Neo4j
+- Handles permissions and access control
+- Automatic content updates through scheduled indexing
 
 ## License
 
