@@ -9,6 +9,10 @@ from slack_assets import SlackClient, SlackConfig
 import os
 from dotenv import load_dotenv
 import logging
+from dagster_project.slack.client import SlackClient as NewSlackClient
+from dagster_project.slack.neo4j_service import Neo4jService
+from dagster_project.slack.elastic_service import ElasticsearchService
+from dagster_project.slack.scraper import SlackScraper
 
 # Set up logging
 logging.basicConfig(level=logging.INFO)
@@ -150,6 +154,39 @@ def test_slack_assets():
         raise
 
 
+def test_slack_scraper_asset():
+    try:
+        config = SlackConfig(
+            max_messages_per_channel=5,  # Lower for test speed
+            include_threads=True,
+            include_reactions=True,
+            include_files=True,
+            include_canvases=True,
+            include_links=True,
+        )
+        logger.info("Testing new SlackScraper integration...")
+        slack_client = NewSlackClient()
+        neo4j_service = Neo4jService()
+        elastic_service = ElasticsearchService()
+        scraper = SlackScraper(slack_client, neo4j_service, elastic_service)
+
+        # Get a few public channels
+        channels = slack_client.get_public_channels()
+        logger.info(f"Found {len(channels)} public channels (testing first 1)")
+        test_channels = channels[:1]
+        for channel in test_channels:
+            logger.info(f"Scraping channel: {channel['name']}")
+            try:
+                scraper.scrape_channel(channel, config)
+                logger.info(f"Successfully scraped channel: {channel['name']}")
+            except Exception as e:
+                logger.error(f"Error scraping channel {channel['name']}: {str(e)}")
+                raise
+    except Exception as e:
+        logger.error(f"Error in SlackScraper asset test: {str(e)}")
+        raise
+
+
 if __name__ == "__main__":
     try:
         logger.info("Testing Google Drive assets...")
@@ -157,6 +194,9 @@ if __name__ == "__main__":
 
         logger.info("\nTesting Slack assets...")
         test_slack_assets()
+
+        logger.info("\nTesting new SlackScraper asset...")
+        test_slack_scraper_asset()
     except Exception as e:
         logger.error(f"Test failed: {str(e)}")
         raise
