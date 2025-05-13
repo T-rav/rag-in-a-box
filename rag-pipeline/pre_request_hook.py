@@ -2,7 +2,6 @@ from litellm.integrations.custom_logger import CustomLogger
 from litellm.proxy.proxy_server import UserAPIKeyAuth, DualCache
 from typing import Optional, Literal
 import logging
-import requests
 import json
 import os
 import redis
@@ -18,10 +17,6 @@ import base64
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-# Configure the Haystack search endpoint from environment variables
-HAYSTACK_ENDPOINT = os.environ.get("HAYSTACK_ENDPOINT", "http://haystack:8000/search")
-MAX_RESULTS = int(os.environ.get("HAYSTACK_MAX_RESULTS", "3"))
-
 # Redis configuration for caching
 REDIS_URL = os.environ.get("REDIS_URL", "redis://redis:6379/0")
 REDIS_TTL = int(os.environ.get("REDIS_TTL", "3600"))  # Cache TTL in seconds (1 hour default)
@@ -33,7 +28,7 @@ DB_PORT = os.environ.get("DB_PORT", "5432")
 DB_NAME = os.environ.get("DB_NAME", "openwebui")
 DB_USER = os.environ.get("DB_USER", "postgres")
 DB_PASSWORD = os.environ.get("DB_PASSWORD", "postgres")
-DB_TABLE = os.environ.get("DB_USER_TABLE", "users")  # The table containing user data
+DB_TABLE = os.environ.get("DB_USER_TABLE", "users")
 
 # Initialize Redis client if enabled
 redis_client = None
@@ -45,9 +40,7 @@ if REDIS_ENABLED:
         logger.error(f"Failed to connect to Redis: {e}")
 
 def get_db_connection():
-    """
-    Create a connection to the PostgreSQL database
-    """
+    """Create a connection to the PostgreSQL database"""
     try:
         connection = psycopg2.connect(
             host=DB_HOST,
@@ -63,9 +56,7 @@ def get_db_connection():
         return None
 
 def get_cached_email(user_id: str) -> Optional[str]:
-    """
-    Get email from Redis cache by user ID
-    """
+    """Get email from Redis cache by user ID"""
     if not redis_client:
         return None
         
@@ -82,9 +73,7 @@ def get_cached_email(user_id: str) -> Optional[str]:
         return None
 
 def cache_email(user_id: str, email: str) -> bool:
-    """
-    Store email in Redis cache with TTL
-    """
+    """Store email in Redis cache with TTL"""
     if not redis_client or not email:
         return False
         
@@ -98,9 +87,7 @@ def cache_email(user_id: str, email: str) -> bool:
         return False
 
 def get_user_email_from_db(user_id: str) -> Optional[str]:
-    """
-    Get user email from database by user ID
-    """
+    """Get user email from database by user ID"""
     if not user_id:
         return None
         
@@ -118,7 +105,6 @@ def get_user_email_from_db(user_id: str) -> Optional[str]:
             
         try:
             with conn.cursor(cursor_factory=DictCursor) as cursor:
-                # Query to get user email by ID
                 query = f"SELECT email FROM {DB_TABLE} WHERE id = %s"
                 cursor.execute(query, (user_id,))
                 result = cursor.fetchone()
@@ -126,8 +112,6 @@ def get_user_email_from_db(user_id: str) -> Optional[str]:
                 if result and result['email']:
                     email = result['email']
                     logger.info(f"Found email {email} for user ID {user_id} in database")
-                    
-                    # Cache the result
                     cache_email(user_id, email)
                     return email
                 else:
@@ -141,15 +125,7 @@ def get_user_email_from_db(user_id: str) -> Optional[str]:
         return None
 
 def extract_user_info_from_token(auth_header: str) -> dict:
-    """
-    Extract user information from the authorization header
-    
-    Args:
-        auth_header: The HTTP Authorization header value
-        
-    Returns:
-        Dict with user_id, email, domain information
-    """
+    """Extract user information from the authorization header"""
     user_info = {
         "user_id": None,
         "email": None,
@@ -169,19 +145,13 @@ def extract_user_info_from_token(auth_header: str) -> dict:
         try:
             # Use verify=False for tokens you can't verify
             decoded = jwt.decode(token, options={"verify_signature": False})
-            
-            # Extract user info from decoded token
             user_info["user_id"] = decoded.get("sub") or decoded.get("id")
             user_info["email"] = decoded.get("email")
                 
         except jwt.PyJWTError as e:
-            # If JWT decoding fails, try manual base64 decoding as fallback
             logger.warning(f"JWT decode error: {e}, trying manual decode")
-            
-            # JWT tokens have three parts separated by dots
             parts = token.split('.')
             if len(parts) >= 2:
-                # The payload is the second part
                 padded = parts[1] + '=' * (4 - len(parts[1]) % 4)
                 try:
                     payload = json.loads(base64.b64decode(padded).decode('utf-8'))
@@ -216,10 +186,9 @@ class RAGHandler(CustomLogger):
         call_type: Literal["completion", "text_completion", "embeddings", "image_generation", "moderation", "audio_transcription"]
     ):
         try:
-            # Log all headers from the request data
+            # Log headers from the request data
             headers = data.get("proxy_server_request", {}).get("headers", {})
             logger.info("=== RAG PRE-REQUEST HOOK CALLED ===")
-            logger.info(f"Headers received: {headers}")
             
             # Get authorization header if available
             auth_header = headers.get("authorization", "")
@@ -234,7 +203,7 @@ class RAGHandler(CustomLogger):
             
             # Extract the messages from the request
             messages = data.get("messages", [])
-            if not messages or len(messages) == 0:
+            if not messages:
                 return data
             
             # Get the latest user message
@@ -242,103 +211,36 @@ class RAGHandler(CustomLogger):
             if not user_messages:
                 return data
                 
-            latest_user_message = user_messages[-1]
-            query = latest_user_message.get("content", "")
-            
-            # Call Haystack search endpoint with user authorization
-            search_headers = {}
-            if auth_header:
-                search_headers["Authorization"] = auth_header
+            # Add user context to system message if available
+            if user_info["email"] or user_info["domain"]:
+                system_messages = [msg for msg in messages if msg.get("role") == "system"]
+                user_context = []
                 
-            rag_context = self.get_search_results(query, auth_header)
-            
-            # Create a system message with the RAG context if it doesn't exist
-            system_messages = [msg for msg in messages if msg.get("role") == "system"]
-            
-            if system_messages:
-                # Update existing system message with RAG context
-                system_messages[0]["content"] = f"{system_messages[0]['content']}\n\nRelevant context: {rag_context}"
-            else:
-                # Insert a new system message at the beginning with RAG context
-                messages.insert(0, {
-                    "role": "system",
-                    "content": f"You are a helpful assistant. Please use the following context to inform your response: {rag_context}"
-                })
-            
-            # Update the request data with the modified messages
-            data["messages"] = messages
-            
-            logger.info("Successfully injected RAG context into request")
+                if user_info["email"]:
+                    user_context.append(f"User email: {user_info['email']}")
+                if user_info["domain"]:
+                    user_context.append(f"User domain: {user_info['domain']}")
+                
+                context_str = "\n".join(user_context)
+                
+                if system_messages:
+                    # Update existing system message with user context
+                    system_messages[0]["content"] = f"{system_messages[0]['content']}\n\nUser Context:\n{context_str}"
+                else:
+                    # Insert a new system message with user context
+                    messages.insert(0, {
+                        "role": "system",
+                        "content": f"You are a helpful assistant. User Context:\n{context_str}"
+                    })
+                
+                # Update the request data with the modified messages
+                data["messages"] = messages
+                logger.info("Successfully injected user context into request")
             
         except Exception as e:
             logger.error(f"Error in pre_request_hook: {str(e)}")
-            # Return original data on error to avoid breaking the request
         
         return data
-    
-    def get_search_results(self, query, auth_header=None):
-        """
-        Call the Haystack search endpoint to retrieve relevant documents.
-        
-        Args:
-            query: The user's query
-            auth_header: The authorization header to pass to the search endpoint
-            
-        Returns:
-            A string containing the retrieved context
-        """
-        try:
-            # Set up headers
-            headers = {"Content-Type": "application/json"}
-            if auth_header:
-                headers["Authorization"] = auth_header
-                
-            # Prepare the search request
-            search_data = {
-                "query": query,
-                "top_k": MAX_RESULTS
-            }
-            
-            logger.info(f"Calling Haystack search with query: {query}")
-            
-            # Make the request to the search endpoint
-            response = requests.post(
-                HAYSTACK_ENDPOINT,
-                headers=headers,
-                data=json.dumps(search_data),
-                timeout=10
-            )
-            
-            # Check if the request was successful
-            if response.status_code == 200:
-                search_results = response.json()
-                documents = search_results.get("documents", [])
-                
-                if not documents:
-                    logger.info("No documents found in search results")
-                    return "No relevant documents found for the query."
-                
-                # Format the retrieved documents
-                context_parts = []
-                for i, doc in enumerate(documents, 1):
-                    content = doc.get("content", "").strip()
-                    if content:
-                        source = doc.get("meta", {}).get("source", "Unknown source")
-                        filename = doc.get("meta", {}).get("filename", "Unknown file")
-                        context_parts.append(f"Document {i} (Source: {filename}):\n{content}\n")
-                
-                # Join all document parts into a single context string
-                rag_context = "\n".join(context_parts)
-                
-                logger.info(f"Retrieved {len(documents)} documents from search")
-                return rag_context
-            else:
-                logger.error(f"Search request failed with status code {response.status_code}: {response.text}")
-                return "Error retrieving relevant documents."
-                
-        except Exception as e:
-            logger.error(f"Error in get_search_results: {str(e)}")
-            return "Error retrieving relevant documents."
 
 # Create an instance of the handler
 rag_handler_instance = RAGHandler()

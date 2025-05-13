@@ -1,9 +1,0 @@
-ops:
-  scrape_website:
-    config:
-      base_url: "https://aibuddy.software"
-      max_depth: 2
-      include_images: true
-      include_links: true
-      user_agent: "Mozilla/5.0 (compatible; InsightMesh/1.0; +https://insight-mesh.com)"
-      rate_limit_delay: 1.0 

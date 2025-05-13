@@ -1,6 +1,6 @@
 import logging
 from dagster import asset, AssetExecutionContext, Config, Definitions, ScheduleDefinition, define_asset_job
-from web_scraper import WebScraper, WebScraperConfig
+from web.scraper import WebScraper
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -16,27 +16,25 @@ class WebScrapingConfig(Config):
     rate_limit_delay: float = 1.0
 
 @asset
-def scrape_website(context: AssetExecutionContext):
+def scrape_website(context: AssetExecutionContext, config: WebScrapingConfig):
     """Asset to scrape a website and store its content in Neo4j and Elasticsearch."""
     try:
-        config = context.op_config
-        
-        # Initialize the web scraper
-        scraper = WebScraper(config)
-        
-        # Start scraping from the base URL
+        scraper = WebScraper(
+            base_url=config.base_url,
+            max_depth=config.max_depth,
+            include_images=config.include_images,
+            include_links=config.include_links,
+            user_agent=config.user_agent,
+            rate_limit_delay=config.rate_limit_delay
+        )
         result = scraper.scrape_site()
-        
-        # Add metadata about the scraping process
         context.add_output_metadata({
             "pages_scraped": len(result["scraped_pages"]),
             "total_links": len(result["all_links"]),
             "total_images": len(result["all_images"]),
             "status": "success"
         })
-        
         return result
-        
     except Exception as e:
         logger.error(f"Error during web scraping: {str(e)}")
         context.add_output_metadata({

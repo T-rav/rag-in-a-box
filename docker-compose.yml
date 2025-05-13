@@ -183,7 +183,6 @@ services:
       - NEO4J_USER=neo4j
       - NEO4J_PASSWORD=password
       - SLACK_BOT_TOKEN=${SLACK_BOT_TOKEN}
-      - SLACK_CHANNEL=${SLACK_CHANNEL}
     volumes:
       - ./dagster_project:/app
       - ./credentials:/app/credentials
