@@ -191,6 +191,43 @@ services:
       - neo4j
     restart: unless-stopped
 
+  mcp:
+    build:
+      context: ./mcp-server
+      dockerfile: Dockerfile
+    environment:
+      - MCP_API_KEY=${MCP_API_KEY}
+      - JWT_SECRET_KEY=${JWT_SECRET_KEY}
+      - DB_URL=postgresql+asyncpg://postgres:postgres@postgres:5432/openwebui
+      - REDIS_URL=redis://redis:6379/0
+      - ELASTICSEARCH_HOST=elasticsearch
+      - NEO4J_URI=bolt://neo4j:7687
+      - NEO4J_USER=neo4j
+      - NEO4J_PASSWORD=password
+    ports:
+      - "9090:8000"
+    depends_on:
+      - postgres
+      - redis
+      - elasticsearch
+      - neo4j
+    restart: unless-stopped
+
+  slack-bot:
+    build:
+      context: ./slack-bot
+      dockerfile: Dockerfile
+    environment:
+      - SLACK_BOT_TOKEN=${SLACK_BOT_TOKEN}
+      - SLACK_APP_TOKEN=${SLACK_APP_TOKEN}
+      - LLM_API_URL=http://litellm:8000/v1
+      - LLM_API_KEY=${LLM_API_KEY}
+      - LLM_MODEL=gpt-4
+    depends_on:
+      - litellm
+      - mcp
+    restart: unless-stopped
+
 volumes:
   openwebui_data:
   postgres_data:  # Persistent volume for PostgreSQL data
