@@ -151,6 +151,51 @@ async def validate_token(token: str, token_type: str) -> Dict[str, Any]:
                 decoded["name"] = user["name"]
                 decoded["is_active"] = user["is_active"]
                 
+        elif token_type == "Slack":
+            # For Slack tokens, we expect format "slack:{user_id}"
+            if not token.startswith("slack:"):
+                logger.error("Invalid Slack token format")
+                raise HTTPException(
+                    status_code=401,
+                    detail="Invalid Slack token format. Expected 'slack:{user_id}'"
+                )
+                
+            user_id = token.split(":", 1)[1]
+            log_context(user_id=user_id)
+            logger.info("Extracted Slack user_id from token")
+            
+            # Look up user in Slack users table
+            logger.info("Looking up user in Slack users table")
+            pool = await get_db_pool()
+            async with pool.acquire() as conn:
+                user = await conn.fetchrow(
+                    """
+                    SELECT slack_id, email, real_name, display_name 
+                    FROM slack_users 
+                    WHERE slack_id = $1
+                    """,
+                    user_id
+                )
+                
+                if not user:
+                    logger.error("User not found in Slack users table")
+                    raise HTTPException(
+                        status_code=404,
+                        detail="User not found in Slack users table"
+                    )
+                    
+                logger.info("Found Slack user in database: email={}, name={}", 
+                          user["email"], user["real_name"])
+                
+                # Create decoded token with user info
+                decoded = {
+                    "user_id": user["slack_id"],
+                    "email": user["email"],
+                    "name": user["real_name"] or user["display_name"],
+                    "is_active": True,  # Slack users are always active if they exist
+                    "token_type": "Slack"
+                }
+                
         else:
             logger.info("Validating token with signature verification")
             decoded = jwt.decode(token, settings.JWT_SECRET_KEY, algorithms=["HS256"])

@@ -55,6 +55,8 @@ This directory contains setup instructions and credential files for various inte
 - `channels:join` (to join channels)
 - `users:read` (to read user profiles)
 - `users:read.email` (to read user email addresses)
+- `app_mentions:read` (to respond to mentions)
+- `im:history` (to read direct messages)
 
 #### Content Access Permissions
 - `canvases:read` (access contents of Slack canvases)
@@ -66,6 +68,7 @@ This directory contains setup instructions and credential files for various inte
 
 3. Scroll up and click "Install to Workspace"
 4. Copy the "Bot User OAuth Token" (starts with `xoxb-`)
+5. Enable Socket Mode and copy the "App-Level Token" (starts with `xapp-`)
 
 ### Environment Variables
 Add the following to your `.env` file:
@@ -76,6 +79,7 @@ GOOGLE_DRIVE_FOLDER_IDS=your_folder_ids_here
 
 # Slack Configuration
 SLACK_BOT_TOKEN=xoxb-your-bot-token
+SLACK_APP_TOKEN=xapp-your-app-token  # Required for Socket Mode
 SLACK_CHANNEL=#your-channel-name
 
 # Database Configuration
