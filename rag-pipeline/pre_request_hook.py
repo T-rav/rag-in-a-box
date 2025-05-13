@@ -1,182 +1,100 @@
 from litellm.integrations.custom_logger import CustomLogger
 from litellm.proxy.proxy_server import UserAPIKeyAuth, DualCache
-from typing import Optional, Literal
+from typing import Optional, Literal, Dict, Any, List
 import logging
 import json
 import os
-import redis
-import jwt
-import psycopg2
-from psycopg2.extras import DictCursor
-import base64
-
-# TODO: Implement OpenWebUI integration to fetch user email based on the ID in the JWT token
-# TODO: Cache email lookups in Redis to avoid repeated API calls to OpenWebUI
+import aiohttp
+import asyncio
 
 # Set up logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-# Redis configuration for caching
-REDIS_URL = os.environ.get("REDIS_URL", "redis://redis:6379/0")
-REDIS_TTL = int(os.environ.get("REDIS_TTL", "3600"))  # Cache TTL in seconds (1 hour default)
-REDIS_ENABLED = os.environ.get("REDIS_ENABLED", "true").lower() == "true"
+# MCP Server configuration
+MCP_SERVER_URL = os.environ.get("MCP_SERVER_URL", "http://mcp:8000")
+MCP_API_KEY = os.environ.get("MCP_API_KEY", "")
+MCP_TIMEOUT = int(os.environ.get("MCP_TIMEOUT", "30"))  # Timeout in seconds
+MCP_MAX_RETRIES = int(os.environ.get("MCP_MAX_RETRIES", "3"))
+TOKEN_TYPE = os.environ.get("TOKEN_TYPE", "OpenWebUI")  # Type of JWT token being used
 
-# Database configuration for user lookup
-DB_HOST = os.environ.get("DB_HOST", "postgres")
-DB_PORT = os.environ.get("DB_PORT", "5432")
-DB_NAME = os.environ.get("DB_NAME", "openwebui")
-DB_USER = os.environ.get("DB_USER", "postgres")
-DB_PASSWORD = os.environ.get("DB_PASSWORD", "postgres")
-DB_TABLE = os.environ.get("DB_USER_TABLE", "users")
-
-# Initialize Redis client if enabled
-redis_client = None
-if REDIS_ENABLED:
-    try:
-        redis_client = redis.from_url(REDIS_URL)
-        logger.info(f"Connected to Redis at {REDIS_URL}")
-    except Exception as e:
-        logger.error(f"Failed to connect to Redis: {e}")
-
-def get_db_connection():
-    """Create a connection to the PostgreSQL database"""
-    try:
-        connection = psycopg2.connect(
-            host=DB_HOST,
-            port=DB_PORT,
-            database=DB_NAME,
-            user=DB_USER,
-            password=DB_PASSWORD
-        )
-        logger.info(f"Connected to PostgreSQL database at {DB_HOST}:{DB_PORT}/{DB_NAME}")
-        return connection
-    except Exception as e:
-        logger.error(f"Database connection error: {e}")
-        return None
-
-def get_cached_email(user_id: str) -> Optional[str]:
-    """Get email from Redis cache by user ID"""
-    if not redis_client:
+async def get_context_from_mcp(
+    api_key: str,
+    auth_token: str,
+    token_type: str,
+    prompt: str,
+    history_summary: str,
+    session: Optional[aiohttp.ClientSession] = None
+) -> Optional[Dict[str, Any]]:
+    """Get context from MCP server"""
+    if not api_key or not auth_token or not prompt:
         return None
         
-    try:
-        cache_key = f"user_email:{user_id}"
-        cached_email = redis_client.get(cache_key)
-        if cached_email:
-            email = cached_email.decode('utf-8')
-            logger.info(f"Cache hit: Found email {email} for user ID {user_id}")
-            return email
-        return None
-    except Exception as e:
-        logger.error(f"Error accessing Redis cache: {e}")
-        return None
-
-def cache_email(user_id: str, email: str) -> bool:
-    """Store email in Redis cache with TTL"""
-    if not redis_client or not email:
-        return False
-        
-    try:
-        cache_key = f"user_email:{user_id}"
-        redis_client.setex(cache_key, REDIS_TTL, email)
-        logger.info(f"Cached email {email} for user ID {user_id} for {REDIS_TTL} seconds")
-        return True
-    except Exception as e:
-        logger.error(f"Error writing to Redis cache: {e}")
-        return False
-
-def get_user_email_from_db(user_id: str) -> Optional[str]:
-    """Get user email from database by user ID"""
-    if not user_id:
-        return None
-        
-    try:
-        # First check cache
-        cached_email = get_cached_email(user_id)
-        if cached_email:
-            return cached_email
-            
-        # Connect to the database
-        conn = get_db_connection()
-        if not conn:
-            logger.error("Failed to connect to database for user lookup")
-            return None
-            
-        try:
-            with conn.cursor(cursor_factory=DictCursor) as cursor:
-                query = f"SELECT email FROM {DB_TABLE} WHERE id = %s"
-                cursor.execute(query, (user_id,))
-                result = cursor.fetchone()
-                
-                if result and result['email']:
-                    email = result['email']
-                    logger.info(f"Found email {email} for user ID {user_id} in database")
-                    cache_email(user_id, email)
-                    return email
-                else:
-                    logger.warning(f"User ID {user_id} not found in database or has no email")
-                    return None
-        finally:
-            conn.close()
-            
-    except Exception as e:
-        logger.error(f"Error looking up user email in database: {e}")
-        return None
-
-def extract_user_info_from_token(auth_header: str) -> dict:
-    """Extract user information from the authorization header"""
-    user_info = {
-        "user_id": None,
-        "email": None,
-        "domain": None
+    headers = {
+        "Authorization": f"Bearer {api_key}",
+        "Content-Type": "application/json"
     }
     
-    if not auth_header:
-        return user_info
+    payload = {
+        "auth_token": auth_token,
+        "token_type": token_type,
+        "prompt": prompt,
+        "history_summary": history_summary
+    }
     
+    close_session = False
+    if session is None:
+        session = aiohttp.ClientSession()
+        close_session = True
+        
     try:
-        # Extract token part
-        if auth_header.startswith("Bearer "):
-            token = auth_header[7:]
-        else:
-            token = auth_header
-            
-        try:
-            # Use verify=False for tokens you can't verify
-            decoded = jwt.decode(token, options={"verify_signature": False})
-            user_info["user_id"] = decoded.get("sub") or decoded.get("id")
-            user_info["email"] = decoded.get("email")
-                
-        except jwt.PyJWTError as e:
-            logger.warning(f"JWT decode error: {e}, trying manual decode")
-            parts = token.split('.')
-            if len(parts) >= 2:
-                padded = parts[1] + '=' * (4 - len(parts[1]) % 4)
-                try:
-                    payload = json.loads(base64.b64decode(padded).decode('utf-8'))
-                    user_info["user_id"] = payload.get("sub") or payload.get("id")
-                    user_info["email"] = payload.get("email")
-                except Exception as decode_err:
-                    logger.error(f"Error in manual token decoding: {decode_err}")
-                    
-        # If we have a user ID but no email, look it up in the database
-        if user_info["user_id"] and not user_info["email"]:
-            logger.info(f"Looking up email for user ID: {user_info['user_id']}")
-            user_info["email"] = get_user_email_from_db(user_info["user_id"])
-            
-        # Extract domain from email
-        if user_info["email"] and "@" in user_info["email"]:
-            user_info["domain"] = user_info["email"].split("@")[1]
-                    
+        async with session.post(
+            f"{MCP_SERVER_URL}/context",
+            headers=headers,
+            json=payload,
+            timeout=MCP_TIMEOUT
+        ) as response:
+            if response.status == 200:
+                result = await response.json()
+                logger.info(f"Successfully retrieved context from MCP server")
+                return result
+            else:
+                error_text = await response.text()
+                logger.error(f"MCP server error: {response.status} - {error_text}")
+                return None
     except Exception as e:
-        logger.error(f"Error extracting user info from token: {e}")
+        logger.error(f"Error calling MCP server: {e}")
+        return None
+    finally:
+        if close_session:
+            await session.close()
+
+def summarize_conversation_history(messages: List[Dict[str, str]]) -> str:
+    """Create a summary of the conversation history"""
+    if not messages:
+        return ""
+        
+    # Only include the last few messages to keep the summary concise
+    recent_messages = messages[-5:] if len(messages) > 5 else messages
     
-    return user_info
+    summary = []
+    for msg in recent_messages:
+        role = msg.get("role", "unknown")
+        content = msg.get("content", "").strip()
+        if content:
+            summary.append(f"{role}: {content[:100]}...")
+            
+    return "\n".join(summary)
 
 class RAGHandler(CustomLogger):
     def __init__(self):
-        pass
+        self.session = None
+        
+    async def _ensure_session(self):
+        """Ensure we have an active aiohttp session"""
+        if self.session is None or self.session.closed:
+            self.session = aiohttp.ClientSession()
+        return self.session
 
     async def async_pre_call_hook(
         self,
@@ -192,10 +110,12 @@ class RAGHandler(CustomLogger):
             
             # Get authorization header if available
             auth_header = headers.get("authorization", "")
-            
-            # Extract user information from the token
-            user_info = extract_user_info_from_token(auth_header)
-            logger.info(f"User info extracted: {user_info}")
+            if not auth_header:
+                logger.warning("No authorization header found")
+                return data
+                
+            # Extract token part
+            auth_token = auth_header[7:] if auth_header.startswith("Bearer ") else auth_header
             
             # Only process completion requests
             if call_type != "completion":
@@ -211,36 +131,75 @@ class RAGHandler(CustomLogger):
             if not user_messages:
                 return data
                 
-            # Add user context to system message if available
-            if user_info["email"] or user_info["domain"]:
+            latest_user_message = user_messages[-1]["content"]
+            history_summary = summarize_conversation_history(messages[:-1])  # Exclude latest message
+            
+            # Get context from MCP server
+            session = await self._ensure_session()
+            context = await get_context_from_mcp(
+                api_key=MCP_API_KEY,
+                auth_token=auth_token,
+                token_type=TOKEN_TYPE,
+                prompt=latest_user_message,
+                history_summary=history_summary,
+                session=session
+            )
+            
+            # Add context to system message if available
+            if context and context.get("documents"):
+                # Group documents by source
+                docs_by_source = {}
+                for doc in context["documents"]:
+                    source = doc["source"]
+                    if source not in docs_by_source:
+                        docs_by_source[source] = []
+                    docs_by_source[source].append(doc["content"])
+                
+                # Build the context string with sources at the top
+                context_parts = []
+                
+                # Add source summary at the top
+                source_summary = "Sources used:\n"
+                for source, docs in docs_by_source.items():
+                    source_summary += f"- {source}: {len(docs)} document(s)\n"
+                context_parts.append(source_summary)
+                
+                # Add document contents
+                context_parts.append("\nRelevant content:")
+                for doc in context["documents"]:
+                    context_parts.append(f"\nFrom {doc['source']}:\n{doc['content']}")
+                
+                context_str = "\n".join(context_parts)
+                
+                # Update or create system message
                 system_messages = [msg for msg in messages if msg.get("role") == "system"]
-                user_context = []
-                
-                if user_info["email"]:
-                    user_context.append(f"User email: {user_info['email']}")
-                if user_info["domain"]:
-                    user_context.append(f"User domain: {user_info['domain']}")
-                
-                context_str = "\n".join(user_context)
-                
                 if system_messages:
-                    # Update existing system message with user context
-                    system_messages[0]["content"] = f"{system_messages[0]['content']}\n\nUser Context:\n{context_str}"
+                    system_messages[0]["content"] = f"{system_messages[0]['content']}\n\n{context_str}"
                 else:
-                    # Insert a new system message with user context
                     messages.insert(0, {
                         "role": "system",
-                        "content": f"You are a helpful assistant. User Context:\n{context_str}"
+                        "content": f"You are a helpful assistant. Use the following context to inform your response:\n\n{context_str}"
                     })
                 
                 # Update the request data with the modified messages
                 data["messages"] = messages
-                logger.info("Successfully injected user context into request")
+                logger.info("Successfully injected context into request")
             
         except Exception as e:
             logger.error(f"Error in pre_request_hook: {str(e)}")
         
         return data
+
+    async def __aenter__(self):
+        """Ensure session is created when used as async context manager"""
+        await self._ensure_session()
+        return self
+
+    async def __aexit__(self, exc_type, exc_val, exc_tb):
+        """Clean up session when done"""
+        if self.session and not self.session.closed:
+            await self.session.close()
+            self.session = None
 
 # Create an instance of the handler
 rag_handler_instance = RAGHandler()
