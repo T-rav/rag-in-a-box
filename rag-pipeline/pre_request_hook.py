@@ -174,11 +174,11 @@ class RAGHandler(CustomLogger):
                 # Update or create system message
                 system_messages = [msg for msg in messages if msg.get("role") == "system"]
                 if system_messages:
-                    system_messages[0]["content"] = f"{system_messages[0]['content']}\n\n{context_str}"
+                    system_messages[0]["content"] = f"{system_messages[0]['content']}\n\nBegin your response with a 'Sources:' section that lists all the sources you used, followed by your answer. When providing information in your answer, cite your sources using the format 'According to [source]' or 'From [source]'. For example:\n\nSources:\n- google_drive (2 documents)\n- slack (1 document)\n- web (2 documents)\n\nAccording to google_drive: [information]\nFrom slack: [information]\n\nUse the following context to inform your response:\n\n{context_str}"
                 else:
                     messages.insert(0, {
                         "role": "system",
-                        "content": f"You are a helpful assistant. Use the following context to inform your response:\n\n{context_str}"
+                        "content": f"You are a helpful assistant. Begin your response with a 'Sources:' section that lists all the sources you used, followed by your answer. When providing information in your answer, cite your sources using the format 'According to [source]' or 'From [source]'. For example:\n\nSources:\n- google_drive (2 documents)\n- slack (1 document)\n- web (2 documents)\n\nAccording to google_drive: [information]\nFrom slack: [information]\n\nUse the following context to inform your response:\n\n{context_str}"
                     })
                 
                 # Update the request data with the modified messages
