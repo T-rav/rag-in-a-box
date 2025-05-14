@@ -54,9 +54,11 @@ services:
       - STORE_MODEL_IN_DB=True
       - REDIS_HOST=redis
       - REDIS_PORT=6379
+      - MCP_API_KEY=insight-mesh-mcp-abc-123
+      - PYTHONPATH=/app
     volumes:
       - ./config/litellm_config.yaml:/app/config.yaml
-      - ./rag-pipeline:/app/rag-pipeline
+      - ./rag_pipeline:/app/rag_pipeline
     command: ["--config", "/app/config.yaml", "--detailed_debug"]
     depends_on:
       postgres:

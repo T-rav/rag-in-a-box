@@ -1,14 +1,18 @@
+import sys
+import os
+sys.path.insert(0, os.path.abspath(os.path.dirname(__file__) + "/.."))
+sys.path.insert(0, "/app")
+import logging
+logging.basicConfig(level=logging.ERROR, force=True)
+logging.error("!!! RAG HANDLER MODULE LOADED !!!")
 from litellm.integrations.custom_logger import CustomLogger
 from litellm.proxy.proxy_server import UserAPIKeyAuth, DualCache
 from typing import Optional, Literal, Dict, Any, List
-import logging
 import json
-import os
 import aiohttp
 import asyncio
 
 # Set up logging
-logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 # MCP Server configuration
@@ -103,6 +107,10 @@ class RAGHandler(CustomLogger):
         data: dict,
         call_type: Literal["completion", "text_completion", "embeddings", "image_generation", "moderation", "audio_transcription"]
     ):
+        logger.error("=== RAG HANDLER ENTRY POINT ===")
+        logger.error(f"Call type: {call_type}")
+        logger.error(f"Data keys: {list(data.keys())}")
+        logger.error(f"Headers: {data.get('proxy_server_request', {}).get('headers', {})}")
         try:
             # Only process completion requests
             if call_type != "completion":
