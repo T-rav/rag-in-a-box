@@ -219,6 +219,7 @@ services:
       dockerfile: Dockerfile
     environment:
       - SLACK_BOT_TOKEN=${SLACK_BOT_TOKEN}
+      # SLACK_APP_TOKEN is only needed for Socket Mode in the slack-bot service
       - SLACK_APP_TOKEN=${SLACK_APP_TOKEN}
       - LLM_API_URL=http://litellm:8000/v1
       - LLM_API_KEY=${LLM_API_KEY}

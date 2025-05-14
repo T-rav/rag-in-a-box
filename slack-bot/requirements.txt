@@ -1,5 +1,5 @@
-slack-bolt>=1.18.0
-slack-sdk>=3.21.3
+slack-bolt==1.22.0
+slack-sdk==3.33.5
 aiohttp>=3.8.0
 python-dotenv>=1.0.0
 loguru>=0.7.0 

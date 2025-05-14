@@ -3,8 +3,8 @@ import logging
 import aiohttp
 import asyncio
 from typing import Optional, Dict, Any, List
-from slack_bolt import App
-from slack_bolt.adapter.socket_mode import SocketModeHandler
+from slack_bolt.async_app import AsyncApp
+from slack_bolt.adapter.socket_mode.aiohttp import AsyncSocketModeHandler
 from slack_sdk import WebClient
 from slack_sdk.errors import SlackApiError
 
@@ -13,7 +13,7 @@ logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 # Initialize Slack app
-app = App(token=os.environ.get("SLACK_BOT_TOKEN"))
+app = AsyncApp(token=os.environ.get("SLACK_BOT_TOKEN"))
 
 # LLM configuration
 LLM_API_URL = os.environ.get("LLM_API_URL", "http://localhost:8000/v1")
@@ -72,42 +72,39 @@ async def handle_message(
     channel: str,
     thread_ts: Optional[str] = None
 ):
-    """Handle a message (either DM or mention)"""
+    print(f"DEBUG: Entered handle_message with text={text}, user_id={user_id}, channel={channel}, thread_ts={thread_ts}")
     try:
-        async with aiohttp.ClientSession() as session:
-            # Set auth token in session headers for all requests
-            session.headers.update({"X-Auth-Token": f"slack:{user_id}"})
-            
-            # Prepare messages for LLM
-            messages = [
-                {
-                    "role": "system",
-                    "content": "You are a helpful assistant. Use the following context to inform your response. Begin your response with a 'Sources:' section that lists all the sources you used, followed by your answer. When providing information in your answer, cite your sources using the format 'According to [source]' or 'From [source]'."
-                },
-                {
-                    "role": "user",
-                    "content": text
-                }
-            ]
-            
-            # Get response from LLM - auth token is in session headers
-            llm_response = await get_llm_response(messages, session=session)
-            
-            if llm_response:
-                # Send the response
-                await client.chat_postMessage(
-                    channel=channel,
-                    text=llm_response,
-                    thread_ts=thread_ts
-                )
-            else:
-                await client.chat_postMessage(
-                    channel=channel,
-                    text="I'm sorry, I encountered an error while generating a response.",
-                    thread_ts=thread_ts
-                )
-                
+        # async with aiohttp.ClientSession() as session:
+        #     session.headers.update({"X-Auth-Token": f"slack:{user_id}"})
+        #     messages = [
+        #         {"role": "system", "content": "You are a helpful assistant. ..."},
+        #         {"role": "user", "content": text}
+        #     ]
+        #     llm_response = await get_llm_response(messages, session=session)
+        #     if llm_response:
+        #         await client.chat_postMessage(
+        #             channel=channel,
+        #             text=llm_response,
+        #             thread_ts=thread_ts
+        #         )
+        #     else:
+        #         await client.chat_postMessage(
+        #             channel=channel,
+        #             text="I'm sorry, I encountered an error while generating a response.",
+        #             thread_ts=thread_ts
+        #         )
+        # Instead, just send a static test message:
+        print("DEBUG: About to send static test message")
+        await client.chat_postMessage(
+            channel=channel,
+            text="TEST: WORKING MESSAGE RESPONSE",
+            thread_ts=thread_ts
+        )
+        print("DEBUG: Static test message sent successfully")
     except Exception as e:
+        print(f"DEBUG: Exception in handle_message: {e}")
+        import traceback
+        traceback.print_exc()
         logger.error(f"Error handling message: {e}")
         await client.chat_postMessage(
             channel=channel,
@@ -116,41 +113,38 @@ async def handle_message(
         )
 
 @app.event("app_mention")
-async def handle_mention(event, say, client):
+async def handle_mention(body, say, client):
     """Handle when the bot is mentioned in a channel"""
+    print("DEBUG: handle_mention received body (repr):", repr(body))
+    print("DEBUG: handle_mention received event (repr):", repr(body["event"]))
     try:
-        # Just use the user ID directly from the event
-        user_id = event["user"]
-        
-        # Get the message text, removing the bot mention
-        text = event["text"]
-        text = text.split(">", 1)[1].strip() if ">" in text else text
-        
-        # Handle the message
+        user_id = body["event"]["user"]
+        text = body["event"]["text"]
+        text = text.split("<@", 1)[-1].split(">", 1)[-1].strip() if ">" in text else text
         await handle_message(
             text=text,
             user_id=user_id,
             client=client,
-            channel=event["channel"],
-            thread_ts=event.get("thread_ts")
+            channel=body["event"]["channel"],
+            thread_ts=body["event"].get("thread_ts")
         )
-        
-    except SlackApiError as e:
+    except Exception as e:
+        print("DEBUG: Exception in handle_mention:", e)
+        import traceback
+        traceback.print_exc()
         logger.error(f"Error handling mention: {e}")
         await say("I'm sorry, I encountered an error while processing your request.")
 
 @app.event("message")
-async def handle_direct_message(event, client):
+async def handle_direct_message(body, client):
     """Handle direct messages to the bot"""
+    print("DEBUG: handle_direct_message received body (repr):", repr(body))
+    print("DEBUG: handle_direct_message received event (repr):", repr(body["event"]))
     try:
-        # Ignore messages from bots and non-DM messages
+        event = body["event"]
         if event.get("bot_id") or event.get("channel_type") != "im":
             return
-            
-        # Just use the user ID directly from the event
         user_id = event["user"]
-        
-        # Handle the message
         await handle_message(
             text=event["text"],
             user_id=user_id,
@@ -158,8 +152,10 @@ async def handle_direct_message(event, client):
             channel=event["channel"],
             thread_ts=event.get("thread_ts")
         )
-        
-    except SlackApiError as e:
+    except Exception as e:
+        print("DEBUG: Exception in handle_direct_message:", e)
+        import traceback
+        traceback.print_exc()
         logger.error(f"Error handling direct message: {e}")
         await client.chat_postMessage(
             channel=event["channel"],
@@ -167,9 +163,12 @@ async def handle_direct_message(event, client):
         )
 
 def main():
-    """Start the Slack bot"""
-    handler = SocketModeHandler(app, os.environ.get("SLACK_APP_TOKEN"))
-    handler.start()
+    """Start the Slack bot asynchronously"""
+    async def run():
+        handler = AsyncSocketModeHandler(app, os.environ.get("SLACK_APP_TOKEN"))
+        await handler.start_async()
+        print("DEBUG: Slack AsyncApp active sessions (s_… identifiers) reported:", app._session_ids)
+    asyncio.run(run())
 
 if __name__ == "__main__":
     main() 

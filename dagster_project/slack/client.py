@@ -215,7 +215,7 @@ class SlackClient:
 
             while True:
                 response = self._make_slack_call(
-                    self.client.bookmarks_list, channel=channel_id, cursor=cursor
+                    self.client.bookmarks_list, channel_id=channel_id, cursor=cursor
                 )
                 bookmarks.extend(response["bookmarks"])
 
