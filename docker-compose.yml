@@ -56,6 +56,7 @@ services:
       - REDIS_PORT=6379
     volumes:
       - ./config/litellm_config.yaml:/app/config.yaml
+      - ./rag-pipeline:/app/rag-pipeline
     command: ["--config", "/app/config.yaml", "--detailed_debug"]
     depends_on:
       postgres:
