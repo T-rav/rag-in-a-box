@@ -19,5 +19,5 @@ COPY . .
 # Expose the port that dagster webserver will run on
 EXPOSE 3000
 
-# Start the dagster webserver
-CMD ["dagster", "dev", "-h", "0.0.0.0", "-p", "3000", "-f", "google_drive_assets.py"] 
+# Start the dagster webserver with multiple job files
+CMD ["dagster", "dev", "-h", "0.0.0.0", "-p", "3000", "-f", "google_drive_assets.py", "-f", "slack_job.py"] 
