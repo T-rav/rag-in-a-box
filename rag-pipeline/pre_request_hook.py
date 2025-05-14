@@ -104,27 +104,24 @@ class RAGHandler(CustomLogger):
         call_type: Literal["completion", "text_completion", "embeddings", "image_generation", "moderation", "audio_transcription"]
     ):
         try:
-            # Log headers from the request data
-            headers = data.get("proxy_server_request", {}).get("headers", {})
-            logger.info("=== RAG PRE-REQUEST HOOK CALLED ===")
-            
-            # Get authorization header if available
-            auth_header = headers.get("authorization", "")
-            if not auth_header:
-                logger.warning("No authorization header found, using default token")
-                auth_token = "default_token"  # Use a default token
-            else:
-                # Extract token part
-                auth_token = auth_header[7:] if auth_header.startswith("Bearer ") else auth_header
-            
             # Only process completion requests
             if call_type != "completion":
                 return data
-            
-            # Extract the messages from the request
+
+            # Get the messages from the request
             messages = data.get("messages", [])
             if not messages:
                 return data
+
+            # Get authorization header if available
+            headers = data.get("proxy_server_request", {}).get("headers", {})
+            auth_header = headers.get("authorization", "")
+            if not auth_header:
+                logger.warning("No authorization header found, skipping context retrieval")
+                return data
+
+            # Extract token part
+            auth_token = auth_header[7:] if auth_header.startswith("Bearer ") else auth_header
             
             # Get the latest user message
             user_messages = [msg for msg in messages if msg.get("role") == "user"]
@@ -145,59 +142,46 @@ class RAGHandler(CustomLogger):
                 session=session
             )
             
-            # Add context to system message if available
-            if context and context.get("context_items"):
-                # Group context items by source
-                items_by_source = {}
-                for item in context["context_items"]:
-                    source = item["metadata"].get("source", "unknown")
-                    if source not in items_by_source:
-                        items_by_source[source] = []
-                    items_by_source[source].append(item["content"])
-                
-                # Build the context string with sources at the top
+            # Only modify the request if we got valid context
+            if context and context.get("documents"):
+                # Build the context string from documents
                 context_parts = []
-                
-                # Add source summary at the top
-                source_summary = "Sources used:\n"
-                for source, items in items_by_source.items():
-                    source_summary += f"- {source}: {len(items)} item(s)\n"
-                context_parts.append(source_summary)
-                
-                # Add context item contents
-                context_parts.append("\nRelevant content:")
-                for item in context["context_items"]:
-                    source = item["metadata"].get("source", "unknown")
-                    context_parts.append(f"\nFrom {source}:\n{item['content']}")
+                for doc in context["documents"]:
+                    source = doc.get("source", "unknown")
+                    content = doc.get("content", "")
+                    if content:
+                        context_parts.append(f"[{source}] {content}")
                 
                 context_str = "\n".join(context_parts)
                 
-                # Update or create system message
+                # Find or create system message
                 system_messages = [msg for msg in messages if msg.get("role") == "system"]
                 if system_messages:
-                    system_messages[0]["content"] = f"{system_messages[0]['content']}\n\nBegin your response with a 'Sources:' section that lists all the sources you used, followed by your answer. When providing information in your answer, cite your sources using the format 'According to [source]' or 'From [source]'. For example:\n\nSources:\n- google_drive (2 items)\n- slack (1 item)\n- web (2 items)\n\nAccording to google_drive: [information]\nFrom slack: [information]\n\nUse the following context to inform your response:\n\n{context_str}"
+                    # Just append the documents as reference
+                    system_messages[0]["content"] = f"{system_messages[0]['content']}\n\nReference documents:\n{context_str}"
                 else:
+                    # Create minimal system message with just the documents
                     messages.insert(0, {
                         "role": "system",
-                        "content": f"You are a helpful assistant. Begin your response with a 'Sources:' section that lists all the sources you used, followed by your answer. When providing information in your answer, cite your sources using the format 'According to [source]' or 'From [source]'. For example:\n\nSources:\n- google_drive (2 items)\n- slack (1 item)\n- web (2 items)\n\nAccording to google_drive: [information]\nFrom slack: [information]\n\nUse the following context to inform your response:\n\n{context_str}"
+                        "content": f"You are a helpful assistant. Reference documents:\n{context_str}"
                     })
                 
-                # Update the request data with the modified messages
+                # Update the request data
                 data["messages"] = messages
-                logger.info("Successfully injected context into request")
+                logger.info("Successfully injected context documents")
             
         except Exception as e:
             logger.error(f"Error in pre_request_hook: {str(e)}")
+            # On error, return the original data unchanged
+            return data
         
         return data
 
     async def __aenter__(self):
-        """Ensure session is created when used as async context manager"""
         await self._ensure_session()
         return self
 
     async def __aexit__(self, exc_type, exc_val, exc_tb):
-        """Clean up session when done"""
         if self.session and not self.session.closed:
             await self.session.close()
             self.session = None
