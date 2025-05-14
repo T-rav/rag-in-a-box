@@ -1,6 +1,5 @@
 from dagster import Definitions, define_asset_job, ScheduleDefinition
 from slack_assets import (
-    slack_test_message,
     slack_channel_info,
     slack_users,
     scrape_slack_content
@@ -9,7 +8,7 @@ from slack_assets import (
 # Define the Slack job
 slack_job = define_asset_job(
     name="slack_job",
-    selection=[slack_test_message, slack_channel_info, slack_users, scrape_slack_content]
+    selection=[slack_channel_info, slack_users, scrape_slack_content]
 )
 
 # Define schedule
@@ -20,7 +19,7 @@ slack_schedule = ScheduleDefinition(
 
 # Create definitions
 defs = Definitions(
-    assets=[slack_test_message, slack_channel_info, slack_users, scrape_slack_content],
+    assets=[slack_channel_info, slack_users, scrape_slack_content],
     schedules=[slack_schedule],
     jobs=[slack_job]
 ) 
