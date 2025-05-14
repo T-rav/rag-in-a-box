@@ -56,6 +56,7 @@ services:
       - REDIS_PORT=6379
       - MCP_API_KEY=insight-mesh-mcp-abc-123
       - PYTHONPATH=/app
+      - LLM_API_KEY=sk-litellm-llm-key-123456  # Default key for LLM service
     volumes:
       - ./config/litellm_config.yaml:/app/config.yaml
       - ./rag_pipeline:/app/rag_pipeline
