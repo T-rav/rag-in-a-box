@@ -2,23 +2,23 @@ from typing import Optional, Dict, Any, List
 from datetime import datetime, timedelta
 from loguru import logger
 import time
-from database import (
-    get_user_by_id,
-    get_user_by_email,
-    create_user,
-    get_openwebui_user_by_email,
-    get_user_contexts,
-    create_context,
-    get_conversation_history,
-    create_conversation,
-    add_message
-)
-from cache import cache
+# from database import (
+#     get_user_by_id,
+#     get_user_by_email,
+#     create_user,
+#     get_openwebui_user_by_email,
+#     get_user_contexts,
+#     create_context,
+#     get_conversation_history,
+#     create_conversation,
+#     add_message
+# )
+# from cache import cache
 from elastic_service import ElasticsearchService
 
 class ContextService:
     def __init__(self):
-        self.cache = cache
+        # self.cache = cache
         self.es = ElasticsearchService()
         
     async def get_or_create_user(
@@ -29,58 +29,17 @@ class ContextService:
         openwebui_id: Optional[str] = None
     ) -> Dict[str, Any]:
         """Get or create a user, using cache when possible"""
-        # Try cache first
-        cached_user = await self.cache.get_user(user_id)
-        if cached_user:
-            return cached_user
-            
-        # Try database
-        user = await get_user_by_id(user_id)
-        if user:
-            # Cache the user
-            user_data = {
-                "id": user.id,
-                "email": user.email,
-                "name": user.name,
-                "created_at": user.created_at.isoformat(),
-                "updated_at": user.updated_at.isoformat() if user.updated_at else None,
-                "is_active": user.is_active,
-                "metadata": user.metadata,
-                "openwebui_id": user.openwebui_id
-            }
-            await self.cache.set_user(user_id, user_data)
-            return user_data
-            
-        # If we have an email but no OpenWebUI ID, try to find the OpenWebUI user
-        if email and not openwebui_id:
-            openwebui_user = await get_openwebui_user_by_email(email)
-            if openwebui_user:
-                openwebui_id = openwebui_user.id
-                if not name:
-                    name = openwebui_user.name
-            
-        # Create new user if we have enough information
-        if email:
-            user = await create_user(
-                user_id=user_id,
-                email=email,
-                name=name,
-                openwebui_id=openwebui_id
-            )
-            user_data = {
-                "id": user.id,
-                "email": user.email,
-                "name": user.name,
-                "created_at": user.created_at.isoformat(),
-                "updated_at": None,
-                "is_active": True,
-                "metadata": {},
-                "openwebui_id": user.openwebui_id
-            }
-            await self.cache.set_user(user_id, user_data)
-            return user_data
-            
-        return None
+        # Commented out all DB/cache logic, just return dummy user
+        return {
+            "id": user_id,
+            "email": email or "dummy@example.com",
+            "name": name or "Dummy User",
+            "created_at": datetime.utcnow().isoformat(),
+            "updated_at": None,
+            "is_active": True,
+            "metadata": {},
+            "openwebui_id": openwebui_id
+        }
         
     async def get_context_for_prompt(
         self,
@@ -92,19 +51,19 @@ class ContextService:
         """Get relevant documents for a user's prompt"""
         start_time = time.time()
         
-        # Try cache first
-        cached_context = await self.cache.get_context(user_id, prompt)
-        if cached_context:
-            cached_context["cache_hit"] = True
-            cached_context["retrieval_time_ms"] = int((time.time() - start_time) * 1000)
-            return cached_context
-            
+        # Try cache first (disabled)
+        # cached_context = await self.cache.get_context(user_id, prompt)
+        # if cached_context:
+        #     cached_context["cache_hit"] = True
+        #     cached_context["retrieval_time_ms"] = int((time.time() - start_time) * 1000)
+        #     return cached_context
+        
         # Get user's email for permission filtering
         user_email = user_info.get("email") if user_info else None
         if not user_email:
             logger.warning("No user email provided for context retrieval")
             return {"documents": [], "retrieval_time_ms": int((time.time() - start_time) * 1000)}
-            
+        
         try:
             # Search for relevant documents
             documents = await self.es.search_documents(
@@ -125,8 +84,8 @@ class ContextService:
                 "retrieval_time_ms": int((time.time() - start_time) * 1000)
             }
             
-            # Cache the context
-            await self.cache.set_context(user_id, prompt, context)
+            # Cache the context (disabled)
+            # await self.cache.set_context(user_id, prompt, context)
             
             return context
             
@@ -141,44 +100,23 @@ class ContextService:
         content: str,
         metadata: Optional[Dict[str, Any]] = None
     ) -> Dict[str, Any]:
-        """Update conversation with a new message"""
-        # Get or create conversation
-        conversations = await get_conversation_history(user_id, limit=1)
-        if conversations:
-            conversation = conversations[0]
-        else:
-            conversation = await create_conversation(
-                user_id=user_id,
-                title=content[:50] + "..." if len(content) > 50 else content
-            )
-            
-        # Add message
-        message = await add_message(
-            conversation_id=conversation.id,
-            role=role,
-            content=content,
-            metadata=metadata
-        )
-        
-        # Update cache
-        conversation_data = {
-            "id": conversation.id,
+        """Update conversation with a new message (DB disabled)"""
+        # Commented out DB logic, just return dummy conversation
+        return {
+            "id": "dummy_conversation",
             "user_id": user_id,
-            "title": conversation.title,
-            "created_at": conversation.created_at.isoformat(),
-            "updated_at": conversation.updated_at.isoformat(),
+            "title": content[:50] + "..." if len(content) > 50 else content,
+            "created_at": datetime.utcnow().isoformat(),
+            "updated_at": datetime.utcnow().isoformat(),
             "messages": [
                 {
-                    "role": message.role,
-                    "content": message.content,
-                    "created_at": message.created_at.isoformat(),
-                    "metadata": message.metadata
+                    "role": role,
+                    "content": content,
+                    "created_at": datetime.utcnow().isoformat(),
+                    "metadata": metadata or {}
                 }
             ]
         }
-        await self.cache.set_conversation(conversation.id, conversation_data)
-        
-        return conversation_data
 
     async def close(self):
         """Clean up resources"""

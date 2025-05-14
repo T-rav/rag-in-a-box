@@ -111,11 +111,11 @@ class RAGHandler(CustomLogger):
             # Get authorization header if available
             auth_header = headers.get("authorization", "")
             if not auth_header:
-                logger.warning("No authorization header found")
-                return data
-                
-            # Extract token part
-            auth_token = auth_header[7:] if auth_header.startswith("Bearer ") else auth_header
+                logger.warning("No authorization header found, using default token")
+                auth_token = "default_token"  # Use a default token
+            else:
+                # Extract token part
+                auth_token = auth_header[7:] if auth_header.startswith("Bearer ") else auth_header
             
             # Only process completion requests
             if call_type != "completion":
@@ -146,39 +146,40 @@ class RAGHandler(CustomLogger):
             )
             
             # Add context to system message if available
-            if context and context.get("documents"):
-                # Group documents by source
-                docs_by_source = {}
-                for doc in context["documents"]:
-                    source = doc["source"]
-                    if source not in docs_by_source:
-                        docs_by_source[source] = []
-                    docs_by_source[source].append(doc["content"])
+            if context and context.get("context_items"):
+                # Group context items by source
+                items_by_source = {}
+                for item in context["context_items"]:
+                    source = item["metadata"].get("source", "unknown")
+                    if source not in items_by_source:
+                        items_by_source[source] = []
+                    items_by_source[source].append(item["content"])
                 
                 # Build the context string with sources at the top
                 context_parts = []
                 
                 # Add source summary at the top
                 source_summary = "Sources used:\n"
-                for source, docs in docs_by_source.items():
-                    source_summary += f"- {source}: {len(docs)} document(s)\n"
+                for source, items in items_by_source.items():
+                    source_summary += f"- {source}: {len(items)} item(s)\n"
                 context_parts.append(source_summary)
                 
-                # Add document contents
+                # Add context item contents
                 context_parts.append("\nRelevant content:")
-                for doc in context["documents"]:
-                    context_parts.append(f"\nFrom {doc['source']}:\n{doc['content']}")
+                for item in context["context_items"]:
+                    source = item["metadata"].get("source", "unknown")
+                    context_parts.append(f"\nFrom {source}:\n{item['content']}")
                 
                 context_str = "\n".join(context_parts)
                 
                 # Update or create system message
                 system_messages = [msg for msg in messages if msg.get("role") == "system"]
                 if system_messages:
-                    system_messages[0]["content"] = f"{system_messages[0]['content']}\n\nBegin your response with a 'Sources:' section that lists all the sources you used, followed by your answer. When providing information in your answer, cite your sources using the format 'According to [source]' or 'From [source]'. For example:\n\nSources:\n- google_drive (2 documents)\n- slack (1 document)\n- web (2 documents)\n\nAccording to google_drive: [information]\nFrom slack: [information]\n\nUse the following context to inform your response:\n\n{context_str}"
+                    system_messages[0]["content"] = f"{system_messages[0]['content']}\n\nBegin your response with a 'Sources:' section that lists all the sources you used, followed by your answer. When providing information in your answer, cite your sources using the format 'According to [source]' or 'From [source]'. For example:\n\nSources:\n- google_drive (2 items)\n- slack (1 item)\n- web (2 items)\n\nAccording to google_drive: [information]\nFrom slack: [information]\n\nUse the following context to inform your response:\n\n{context_str}"
                 else:
                     messages.insert(0, {
                         "role": "system",
-                        "content": f"You are a helpful assistant. Begin your response with a 'Sources:' section that lists all the sources you used, followed by your answer. When providing information in your answer, cite your sources using the format 'According to [source]' or 'From [source]'. For example:\n\nSources:\n- google_drive (2 documents)\n- slack (1 document)\n- web (2 documents)\n\nAccording to google_drive: [information]\nFrom slack: [information]\n\nUse the following context to inform your response:\n\n{context_str}"
+                        "content": f"You are a helpful assistant. Begin your response with a 'Sources:' section that lists all the sources you used, followed by your answer. When providing information in your answer, cite your sources using the format 'According to [source]' or 'From [source]'. For example:\n\nSources:\n- google_drive (2 items)\n- slack (1 item)\n- web (2 items)\n\nAccording to google_drive: [information]\nFrom slack: [information]\n\nUse the following context to inform your response:\n\n{context_str}"
                     })
                 
                 # Update the request data with the modified messages

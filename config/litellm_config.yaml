@@ -18,11 +18,12 @@ general_settings:
   completion_model: gpt-4o
   num_workers: 4  # Increase worker count for better concurrency
   cache: true  # Enable response caching for better performance
+  store_prompts_in_spend_logs: true  # Store prompts in spend logs
   cache_params:
-    type: redis  # Use Redis for distributed caching
     host: localhost
     port: 6379
-    ttl: 3600  # Cache responses for 1 hour
+    type: redis  # Use Redis for distributed caching
+  ttl: 3600  # Cache responses for 1 hour
 
 # Logging configuration
 logging:
@@ -39,5 +40,4 @@ rate_limits:
 litellm_settings:
   num_retries: 3
   request_timeout: 30
-  callbacks: rag-pipeline.pre_request_hook.rag_handler_instance
   forward_client_headers_to_llm_api: true

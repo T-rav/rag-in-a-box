@@ -1,5 +1,6 @@
-from fastapi import FastAPI, HTTPException, Depends, Header
+from fastapi import FastAPI, HTTPException, Depends, Header, Request
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
 from typing import Optional, Dict, Any, List
 from datetime import datetime
@@ -7,16 +8,48 @@ import jwt
 from loguru import logger
 import os
 from dotenv import load_dotenv
-from context_service import context_service
-from cache import cache
-import asyncpg
-import uvicorn
-from uvicorn.protocols.fcgi import FCGIProtocol
 from contextvars import ContextVar
 from functools import wraps
+import time
+import json
+from context_service import context_service
 
 # Load environment variables
 load_dotenv()
+
+# Configure logger to write to both file and console
+logger.remove()  # Remove default handler
+
+# Create a context filter class
+class ContextFilter:
+    """Filter to add context to log records"""
+    def __init__(self):
+        self.context = {"user_id": "unknown", "token_type": "unknown"}
+    
+    def __call__(self, record):
+        """Add context to log record"""
+        record["extra"]["user_id"] = self.context["user_id"]
+        record["extra"]["token_type"] = self.context["token_type"]
+        return True
+
+# Create and configure the context filter
+context_filter = ContextFilter()
+
+# Add handlers with context filter
+logger.add(
+    "logs/mcp_server.log",
+    rotation="100 MB",
+    retention="1 week",
+    level="INFO",
+    format="{time:YYYY-MM-DD HH:mm:ss.SSS} | {level} | {extra[user_id]} | {extra[token_type]} | {message}",
+    filter=context_filter
+)
+logger.add(
+    lambda msg: print(msg, end=""),  # Console handler
+    level="INFO",
+    format="{time:YYYY-MM-DD HH:mm:ss.SSS} | {level} | {extra[user_id]} | {extra[token_type]} | {message}",
+    filter=context_filter
+)
 
 # Context variables for logging
 request_context = ContextVar("request_context", default={"user_id": None, "token_type": None})
@@ -26,17 +59,11 @@ def log_context(user_id: Optional[str] = None, token_type: Optional[str] = None)
     current = request_context.get()
     if user_id:
         current["user_id"] = user_id
+        context_filter.context["user_id"] = user_id
     if token_type:
         current["token_type"] = token_type
+        context_filter.context["token_type"] = token_type
     request_context.set(current)
-
-# Configure logger to include context
-logger.configure(
-    extra={
-        "user_id": lambda: request_context.get()["user_id"],
-        "token_type": lambda: request_context.get()["token_type"]
-    }
-)
 
 # Initialize FastAPI app
 app = FastAPI(
@@ -53,6 +80,72 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+# Add request/response logging middleware
+@app.middleware("http")
+async def log_requests_middleware(request: Request, call_next):
+    # Log request
+    request_id = request.headers.get("X-Request-ID", "no-request-id")
+    start_time = time.time()
+    
+    # Get request body if it exists
+    body = None
+    if request.method in ["POST", "PUT", "PATCH"]:
+        try:
+            body = await request.json()
+        except:
+            body = "Could not parse request body"
+    
+    # Log request details
+    logger.info(
+        f"Request started | {request.method} {request.url.path} | ID: {request_id} | "
+        f"Headers: {dict(request.headers)} | Body: {json.dumps(body) if body else 'No body'}"
+    )
+    
+    try:
+        # Process the request
+        response = await call_next(request)
+        
+        # Calculate processing time
+        process_time = time.time() - start_time
+        
+        # Get response body
+        response_body = b""
+        async for chunk in response.body_iterator:
+            response_body += chunk
+        
+        # Reconstruct response with the body
+        response = JSONResponse(
+            content=json.loads(response_body) if response_body else None,
+            status_code=response.status_code,
+            headers=dict(response.headers),
+        )
+        
+        # Patch: Safely log response body
+        try:
+            body_str = response_body.decode("utf-8")
+            try:
+                body_json = json.loads(body_str)
+                log_body = json.dumps(body_json)
+            except Exception:
+                log_body = body_str
+        except Exception:
+            log_body = "<non-decodable bytes>"
+        
+        logger.info(
+            f"Request completed | {request.method} {request.url.path} | ID: {request_id} | "
+            f"Status: {response.status_code} | Time: {process_time:.3f}s | "
+            f"Response: {log_body}"
+        )
+        
+        return response
+    except Exception as e:
+        # Log any errors
+        logger.error(
+            f"Request failed | {request.method} {request.url.path} | ID: {request_id} | "
+            f"Error: {str(e)}"
+        )
+        raise
 
 # Models
 class ContextRequest(BaseModel):
@@ -83,16 +176,6 @@ class Settings:
 
 settings = Settings()
 
-# Database connection pool
-db_pool = None
-
-async def get_db_pool():
-    """Get or create database connection pool"""
-    global db_pool
-    if db_pool is None:
-        db_pool = await asyncpg.create_pool(settings.OPENWEBUI_DB_URL)
-    return db_pool
-
 # Dependencies
 async def verify_api_key(x_api_key: str = Header(...)) -> None:
     """Verify the API key from the request header"""
@@ -108,103 +191,63 @@ async def validate_token(token: str, token_type: str) -> Dict[str, Any]:
         log_context(token_type=token_type)
         logger.info("Validating token")
         
+        # Handle default token
+        if token == "default_token":
+            logger.info("Using default token with default email")
+            return {
+                "user_id": "default_user",
+                "email": "tmfrisinger@gmail.com",
+                "name": "Default User",
+                "is_active": True,
+                "token_type": token_type
+            }
+        
         # For OpenWebUI tokens, we don't verify the signature
         if token_type == "OpenWebUI":
             logger.debug("Decoding OpenWebUI token without signature verification")
             decoded = jwt.decode(token, options={"verify_signature": False})
             logger.debug("Decoded token payload: {}", decoded)
-            
-            # For OpenWebUI, we need to look up the user in the database
-            user_id = decoded.get("sub")  # OpenWebUI uses 'sub' for user ID
+            user_id = decoded.get("sub")
             log_context(user_id=user_id)
             logger.info("Extracted user_id from token")
-            
             if not user_id:
                 logger.error("OpenWebUI token missing user_id (sub claim)")
                 raise HTTPException(
                     status_code=401,
                     detail="Invalid OpenWebUI token: missing user ID"
                 )
-                
-            # Look up user in OpenWebUI database
-            logger.info("Looking up user in OpenWebUI database")
-            pool = await get_db_pool()
-            async with pool.acquire() as conn:
-                user = await conn.fetchrow(
-                    "SELECT id, email, name, is_active FROM users WHERE id = $1",
-                    user_id
-                )
-                
-                if not user:
-                    logger.error("User not found in OpenWebUI database")
-                    raise HTTPException(
-                        status_code=404,
-                        detail="User not found in OpenWebUI database"
-                    )
-                    
-                logger.info("Found user in database: email={}, name={}, active={}", 
-                          user["email"], user["name"], user["is_active"])
-                
-                # Add user info to the decoded token
-                decoded["user_id"] = user["id"]
-                decoded["email"] = user["email"]
-                decoded["name"] = user["name"]
-                decoded["is_active"] = user["is_active"]
-                
+            # Instead, always use default user
+            decoded["user_id"] = user_id
+            decoded["email"] = "tmfrisinger@gmail.com"
+            decoded["name"] = "Default User"
+            decoded["is_active"] = True
+            return decoded
         elif token_type == "Slack":
-            # For Slack tokens, we expect format "slack:{user_id}"
             if not token.startswith("slack:"):
                 logger.error("Invalid Slack token format")
                 raise HTTPException(
                     status_code=401,
                     detail="Invalid Slack token format. Expected 'slack:{user_id}'"
                 )
-                
             user_id = token.split(":", 1)[1]
             log_context(user_id=user_id)
             logger.info("Extracted Slack user_id from token")
-            
-            # Look up user in Slack users table
-            logger.info("Looking up user in Slack users table")
-            pool = await get_db_pool()
-            async with pool.acquire() as conn:
-                user = await conn.fetchrow(
-                    """
-                    SELECT slack_id, email, real_name, display_name 
-                    FROM slack_users 
-                    WHERE slack_id = $1
-                    """,
-                    user_id
-                )
-                
-                if not user:
-                    logger.error("User not found in Slack users table")
-                    raise HTTPException(
-                        status_code=404,
-                        detail="User not found in Slack users table"
-                    )
-                    
-                logger.info("Found Slack user in database: email={}, name={}", 
-                          user["email"], user["real_name"])
-                
-                # Create decoded token with user info
-                decoded = {
-                    "user_id": user["slack_id"],
-                    "email": user["email"],
-                    "name": user["real_name"] or user["display_name"],
-                    "is_active": True,  # Slack users are always active if they exist
-                    "token_type": "Slack"
-                }
-                
+            # Instead, always use default user
+            decoded = {
+                "user_id": user_id,
+                "email": "tmfrisinger@gmail.com",
+                "name": "Default User",
+                "is_active": True,
+                "token_type": "Slack"
+            }
+            return decoded
         else:
             logger.info("Validating token with signature verification")
             decoded = jwt.decode(token, settings.JWT_SECRET_KEY, algorithms=["HS256"])
             logger.debug("Decoded token payload: {}", decoded)
-            
             user_id = decoded.get("sub") or decoded.get("id")
             log_context(user_id=user_id)
             logger.info("Extracted user_id from token")
-            
             if not user_id:
                 logger.error("Token missing user ID")
                 raise HTTPException(
@@ -212,10 +255,8 @@ async def validate_token(token: str, token_type: str) -> Dict[str, Any]:
                     detail="Invalid token: missing user ID"
                 )
             decoded["user_id"] = user_id
-        
         logger.info("Token validation successful")
         return decoded
-        
     except jwt.InvalidTokenError as e:
         logger.error("Invalid token error: {}", str(e))
         raise HTTPException(
@@ -235,13 +276,11 @@ async def startup_event():
     """Initialize services on startup"""
     try:
         # Initialize cache
-        await cache.connect()
-        logger.info("Cache initialized")
-        
-        # Initialize database pool
-        await get_db_pool()
-        logger.info("Database pool initialized")
-        
+        # await cache.connect()
+        # logger.info("Cache initialized")
+        # --- DB pool initialization commented out ---
+        # await get_db_pool()
+        # logger.info("Database pool initialized")
         # Initialize Elasticsearch service
         # Note: The Elasticsearch service is initialized in the ContextService
         logger.info("Services initialized")
@@ -253,16 +292,15 @@ async def startup_event():
 async def shutdown_event():
     """Clean up connections on shutdown"""
     try:
-        await cache.disconnect()
-        logger.info("Cache disconnected")
-        
-        if db_pool:
-            await db_pool.close()
-            logger.info("Database pool closed")
-            
+        # await cache.disconnect()
+        # logger.info("Cache disconnected")
+        # if db_pool:
+        #     await db_pool.close()
+        #     logger.info("Database pool closed")
         # Close Elasticsearch service
-        await context_service.close()
-        logger.info("Elasticsearch service closed")
+        # await context_service.close()
+        # logger.info("Elasticsearch service closed")
+        pass
     except Exception as e:
         logger.error("Error during shutdown: {}", str(e))
 
@@ -277,70 +315,42 @@ async def get_context(
     """
     try:
         log_context(token_type=request.token_type)
-        logger.info("Received context request")
-        logger.debug("Request prompt: {}", request.prompt)
+        logger.info(f"Processing context request for prompt: {request.prompt[:100]}...")  # Log first 100 chars of prompt
         if request.history_summary:
-            logger.debug("History summary: {}", request.history_summary)
-            
+            logger.debug(f"History summary: {request.history_summary[:200]}...")  # Log first 200 chars of history
+        
         # Validate the token and get user info
         user_info = await validate_token(request.auth_token, request.token_type)
-        user_id = user_info["user_id"]  # We ensure this is set in validate_token
+        user_id = user_info["user_id"]
         log_context(user_id=user_id)
-        logger.info("Processing request")
+        logger.info(f"User authenticated: {user_id}")
         
-        # Get context for the prompt
-        logger.info("Retrieving context for prompt")
+        # Get context for the prompt using ContextService (this will search Elasticsearch)
         context = await context_service.get_context_for_prompt(
             user_id=user_id,
             prompt=request.prompt,
             history_summary=request.history_summary,
-            user_info=user_info  # Pass full user info for context generation
+            user_info=user_info
         )
-        logger.debug("Retrieved context: {}", context)
+        logger.info(f"Context retrieved - Cache hit: {context.get('cache_hit', False)}, "
+                   f"Retrieval time: {context.get('retrieval_time_ms', 0)}ms, "
+                   f"Documents: {len(context.get('documents', []))}")
         
-        # Transform the context into MCP protocol format
         context_items = []
-        
-        # Add system context if available
+        # Add system context if present
         if context.get("system_context"):
-            logger.debug("Adding system context")
+            logger.debug("Adding system context to response")
             context_items.append(ContextItem(
                 content=context["system_context"],
                 role="system",
                 metadata={"source": "system_context"}
             ))
-            
-        # Add relevant documents if available
-        if context.get("documents"):
-            logger.debug("Adding {} documents", len(context["documents"]))
-            for doc in context["documents"]:
-                context_items.append(ContextItem(
-                    content=doc["content"],
-                    role="system",
-                    metadata={
-                        "source": "document",
-                        "document_id": doc.get("id"),
-                        "relevance_score": doc.get("score")
-                    }
-                ))
-                
-        # Add conversation history if available
-        if context.get("conversation_history"):
-            logger.debug("Adding {} conversation history items", len(context["conversation_history"]))
-            for msg in context["conversation_history"]:
-                context_items.append(ContextItem(
-                    content=msg["content"],
-                    role=msg["role"],
-                    metadata={"source": "conversation_history"}
-                ))
-                
-        # If no specific context items were found, add a default system message
-        if not context_items:
-            logger.info("No context items found, adding default system message")
+        # Add document contexts
+        for doc in context.get("documents", []):
             context_items.append(ContextItem(
-                content="I am a helpful assistant. I will provide context-aware responses based on your queries.",
+                content=doc["content"],
                 role="system",
-                metadata={"source": "default"}
+                metadata={"source": doc.get("source", "document")}
             ))
         
         response = ContextResponse(
@@ -353,24 +363,23 @@ async def get_context(
                 },
                 "token_type": request.token_type,
                 "timestamp": datetime.utcnow().isoformat(),
-                "context_sources": context.get("sources", []),
+                "context_sources": [
+                    {"type": "documents", "count": len(context.get("documents", []))}
+                ],
                 "retrieval_metadata": {
                     "cache_hit": bool(context.get("cache_hit", False)),
                     "retrieval_time_ms": context.get("retrieval_time_ms", 0)
                 }
             }
         )
-        logger.info("Returning response with {} context items", len(context_items))
-        logger.debug("Response metadata: {}", response.metadata)
+        logger.info(f"Returning response with {len(context_items)} context items")
         return response
         
-    except HTTPException:
-        raise
     except Exception as e:
-        logger.error("Error processing context request: {}", str(e), exc_info=True)
+        logger.error(f"Error processing context request: {str(e)}", exc_info=True)
         raise HTTPException(
             status_code=500,
-            detail="Internal server error while processing context request"
+            detail=f"Error processing context request: {str(e)}"
         )
     finally:
         # Clear the context at the end of the request

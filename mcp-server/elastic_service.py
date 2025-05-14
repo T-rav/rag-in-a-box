@@ -2,6 +2,7 @@ from elasticsearch import AsyncElasticsearch
 from typing import Dict, Any, List, Optional
 import os
 from loguru import logger
+import json
 
 class ElasticsearchService:
     def __init__(self):
@@ -18,72 +19,35 @@ class ElasticsearchService:
     async def search_documents(
         self,
         query: str,
-        user_email: str,
+        user_email: str = None,  # keep for compatibility but unused
         size: int = 5,
-        indices: List[str] = ["google_drive_files", "slack_messages", "web_pages"]
+        indices: List[str] = ["google_drive_files", "slack_messages", "web_pages"]  # Restored multiple indices
     ) -> List[Dict[str, Any]]:
         """
-        Search for documents across multiple indices with user permission filtering.
-        
-        Args:
-            query: The search query
-            user_email: The user's email for permission filtering
-            size: Maximum number of results to return
-            indices: List of indices to search in
-            
-        Returns:
-            List of documents with their content and metadata
+        Search for documents across multiple indices using a simple match_all query.
         """
         try:
-            # Build the search query with permission filtering
+            # Build a simple match_all query similar to the working curl command
             search_body = {
                 "query": {
-                    "bool": {
-                        "must": [
-                            {
-                                "multi_match": {
-                                    "query": query,
-                                    "fields": ["content^3", "meta.file_name^2", "meta.topic^2"],
-                                    "type": "best_fields",
-                                    "tie_breaker": 0.3
-                                }
-                            }
-                        ],
-                        "filter": [
-                            {
-                                "bool": {
-                                    "should": [
-                                        # Public documents
-                                        {"term": {"meta.is_public": True}},
-                                        # Documents accessible by user's email
-                                        {"term": {"meta.accessible_by_emails": user_email}},
-                                        # Documents accessible by user's domain
-                                        {"prefix": {"meta.accessible_by_domains": user_email.split("@")[1]}}
-                                    ],
-                                    "minimum_should_match": 1
-                                }
-                            }
-                        ]
-                    }
+                    "match_all": {}
                 },
-                "size": size,
-                "_source": {
-                    "includes": [
-                        "content",
-                        "meta.*"
-                    ]
-                }
+                "size": size
             }
             
-            logger.debug("Executing Elasticsearch query: {}", search_body)
+            logger.info("Executing Elasticsearch query with body: {}", json.dumps(search_body, indent=2))
             response = await self.es.search(
                 index=",".join(indices),
                 body=search_body
             )
             
+            # Convert response to dict for logging
+            response_dict = response.body
+            logger.info("Elasticsearch response: {}", json.dumps(response_dict, indent=2))
+            
             # Process and format the results
             results = []
-            for hit in response["hits"]["hits"]:
+            for hit in response_dict["hits"]["hits"]:
                 score = hit["_score"]
                 source = hit["_source"]
                 
@@ -91,7 +55,7 @@ class ElasticsearchService:
                 metadata = source.get("meta", {})
                 result = {
                     "id": hit["_id"],
-                    "content": source.get("content", ""),
+                    "content": source.get("content", ""),  # Access content directly from _source
                     "score": score,
                     "metadata": {
                         "source": metadata.get("source", "unknown"),
@@ -105,7 +69,7 @@ class ElasticsearchService:
                 }
                 results.append(result)
                 
-            logger.info("Found {} relevant documents for user {}", len(results), user_email)
+            logger.info("Found {} relevant documents (no user filter)", len(results))
             return results
             
         except Exception as e:
