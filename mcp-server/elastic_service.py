@@ -30,7 +30,10 @@ class ElasticsearchService:
             # Build a simple match_all query similar to the working curl command
             search_body = {
                 "query": {
-                    "match_all": {}
+                    "multi_match": {
+                        "query": query,
+                        "fields": ["content"]
+                    }
                 },
                 "size": size
             }
