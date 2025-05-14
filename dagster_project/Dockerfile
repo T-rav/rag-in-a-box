@@ -20,4 +20,4 @@ COPY . .
 EXPOSE 3000
 
 # Start the dagster webserver with multiple job files
-CMD ["dagster", "dev", "-h", "0.0.0.0", "-p", "3000", "-f", "google_drive_assets.py", "-f", "slack_job.py"] 
+CMD ["dagster", "dev", "-h", "0.0.0.0", "-p", "3000", "-f", "google_drive_assets.py", "-f", "slack_job.py", "-f", "web_job.py"] 
