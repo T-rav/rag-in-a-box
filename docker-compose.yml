@@ -49,7 +49,7 @@ services:
       - PORT=4000
       - MODEL_TYPE=openai
       - LITELLM_MASTER_KEY=sk-litellm-master-key-123456
-      - LITELLM_SALT_KEY=semUmsej7yCU4XFEuegPB2Mj
+      - LITELLM_SALT_KEY="semUmsej7yCU4XFEuegPB2Mj"
       - DATABASE_URL=postgresql://postgres:postgres@postgres:5432/litellm
       - STORE_MODEL_IN_DB=True
       - REDIS_HOST=redis
@@ -57,6 +57,7 @@ services:
       - MCP_API_KEY=insight-mesh-mcp-abc-123
       - PYTHONPATH=/app
       - LLM_API_KEY=sk-litellm-llm-key-123456  # Default key for LLM service
+      - JWT_SECRET_KEY=your-super-secret-jwt-key-123  # Added JWT secret key
     volumes:
       - ./config/litellm_config.yaml:/app/config.yaml
       - ./rag_pipeline:/app/rag_pipeline
@@ -200,8 +201,8 @@ services:
       context: ./mcp-server
       dockerfile: Dockerfile
     environment:
-      - MCP_API_KEY=${MCP_API_KEY}
-      - JWT_SECRET_KEY=${JWT_SECRET_KEY}
+      - MCP_API_KEY=insight-mesh-mcp-abc-123  # Set explicit value instead of env var
+      - JWT_SECRET_KEY=your-super-secret-jwt-key-123  # Added JWT secret key
       - DB_URL=postgresql+asyncpg://postgres:postgres@postgres:5432/openwebui
       - REDIS_URL=redis://redis:6379/0
       - ELASTICSEARCH_HOST=elasticsearch

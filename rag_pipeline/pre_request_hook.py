@@ -2,18 +2,33 @@ import sys
 import os
 sys.path.insert(0, os.path.abspath(os.path.dirname(__file__) + "/.."))
 sys.path.insert(0, "/app")
+
 import logging
-logging.basicConfig(level=logging.ERROR, force=True)
-logging.error("!!! RAG HANDLER MODULE LOADED !!!")
+
+# Create a custom logger (named "rag_handler") and set its level to INFO.
+logger = logging.getLogger("rag_handler")
+logger.setLevel(logging.INFO)
+
+# (Optional) Create a file handler (writing to /app/rag_handler.log) and set its level to INFO.
+fh = logging.FileHandler("/app/rag_handler.log")
+fh.setLevel(logging.INFO)
+
+# (Optional) Create a formatter (for example, "%(asctime)s – %(name)s – %(levelname)s – %(message)s") and assign it to the file handler.
+formatter = logging.Formatter("%(asctime)s – %(name)s – %(levelname)s – %(message)s")
+fh.setFormatter(formatter)
+
+# (Optional) Add the file handler to our custom logger.
+logger.addHandler(fh)
+
+# (Optional) Log (or "print") a message at the very top (outside of any function) so that if the module is imported (even "lazy" or "dynamic") you'll see that log.
+logger.info("!!! RAG HANDLER MODULE LOADED (using file logger) !!!")
+
 from litellm.integrations.custom_logger import CustomLogger
 from litellm.proxy.proxy_server import UserAPIKeyAuth, DualCache
 from typing import Optional, Literal, Dict, Any, List
 import json
 import aiohttp
 import asyncio
-
-# Set up logging
-logger = logging.getLogger(__name__)
 
 # MCP Server configuration
 MCP_SERVER_URL = os.environ.get("MCP_SERVER_URL", "http://mcp:8000")
@@ -35,7 +50,7 @@ async def get_context_from_mcp(
         return None
         
     headers = {
-        "Authorization": f"Bearer {api_key}",
+        "x-api-key": api_key,
         "Content-Type": "application/json"
     }
     
@@ -93,11 +108,13 @@ def summarize_conversation_history(messages: List[Dict[str, str]]) -> str:
 class RAGHandler(CustomLogger):
     def __init__(self):
         self.session = None
+        logger.info("RAGHandler initialized")
         
     async def _ensure_session(self):
         """Ensure we have an active aiohttp session"""
         if self.session is None or self.session.closed:
             self.session = aiohttp.ClientSession()
+            logger.info("Created new aiohttp session")
         return self.session
 
     async def async_pre_call_hook(
@@ -107,37 +124,37 @@ class RAGHandler(CustomLogger):
         data: dict,
         call_type: Literal["completion", "text_completion", "embeddings", "image_generation", "moderation", "audio_transcription"]
     ):
-        logger.error("=== RAG HANDLER ENTRY POINT ===")
-        logger.error(f"Call type: {call_type}")
-        logger.error(f"Data keys: {list(data.keys())}")
-        logger.error(f"Headers: {data.get('proxy_server_request', {}).get('headers', {})}")
+        logger.info("=== RAG HANDLER ENTRY POINT ===")
+        logger.info(f"Call type: {call_type}")
+        logger.info(f"Data keys: {list(data.keys())}")
+        logger.info(f"Headers: {data.get('proxy_server_request', {}).get('headers', {})}")
         try:
             # Only process completion requests
             if call_type != "completion":
+                logger.info("Skipping non-completion request")
                 return data
 
             # Get the messages from the request
             messages = data.get("messages", [])
             if not messages:
+                logger.warning("No messages in request")
                 return data
 
-            # Get authorization header if available
-            headers = data.get("proxy_server_request", {}).get("headers", {})
-            auth_header = headers.get("authorization", "")
-            if not auth_header:
-                logger.warning("No authorization header found, skipping context retrieval")
-                return data
-
-            # Extract token part
-            auth_token = auth_header[7:] if auth_header.startswith("Bearer ") else auth_header
+            # Always use default token for MCP server
+            auth_token = "default_token"
+            logger.info("Using default token for MCP server")
             
             # Get the latest user message
             user_messages = [msg for msg in messages if msg.get("role") == "user"]
             if not user_messages:
+                logger.warning("No user messages found")
                 return data
                 
             latest_user_message = user_messages[-1]["content"]
+            logger.info(f"Latest user message: {latest_user_message[:100]}...")
+            
             history_summary = summarize_conversation_history(messages[:-1])  # Exclude latest message
+            logger.info(f"History summary: {history_summary[:100]}...")
             
             # Get context from MCP server
             session = await self._ensure_session()
@@ -152,6 +169,7 @@ class RAGHandler(CustomLogger):
             
             # Only modify the request if we got valid context
             if context and context.get("documents"):
+                logger.info(f"Got {len(context['documents'])} documents from MCP")
                 # Build the context string from documents
                 context_parts = []
                 for doc in context["documents"]:
@@ -161,25 +179,30 @@ class RAGHandler(CustomLogger):
                         context_parts.append(f"[{source}] {content}")
                 
                 context_str = "\n".join(context_parts)
+                logger.info(f"Context string length: {len(context_str)}")
                 
                 # Find or create system message
                 system_messages = [msg for msg in messages if msg.get("role") == "system"]
                 if system_messages:
                     # Just append the documents as reference
                     system_messages[0]["content"] = f"{system_messages[0]['content']}\n\nReference documents:\n{context_str}"
+                    logger.info("Updated existing system message with context")
                 else:
                     # Create minimal system message with just the documents
                     messages.insert(0, {
                         "role": "system",
                         "content": f"You are a helpful assistant. Reference documents:\n{context_str}"
                     })
+                    logger.info("Created new system message with context")
                 
                 # Update the request data
                 data["messages"] = messages
                 logger.info("Successfully injected context documents")
+            else:
+                logger.info("No context documents received from MCP")
             
         except Exception as e:
-            logger.error(f"Error in pre_request_hook: {str(e)}")
+            logger.error(f"Error in pre_request_hook: {str(e)}", exc_info=True)
             # On error, return the original data unchanged
             return data
         
@@ -193,6 +216,8 @@ class RAGHandler(CustomLogger):
         if self.session and not self.session.closed:
             await self.session.close()
             self.session = None
+            logger.info("Closed aiohttp session")
 
 # Create an instance of the handler
 rag_handler_instance = RAGHandler()
+logger.info("Created rag_handler_instance")
