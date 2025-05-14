@@ -127,7 +127,7 @@ class RAGHandler(CustomLogger):
         logger.info("=== RAG HANDLER ENTRY POINT ===")
         logger.info(f"Call type: {call_type}")
         logger.info(f"Data keys: {list(data.keys())}")
-        logger.info(f"Headers: {data.get('proxy_server_request', {}).get('headers', {})}")
+        
         try:
             # Only process completion requests
             if call_type != "completion":
@@ -140,7 +140,7 @@ class RAGHandler(CustomLogger):
                 logger.warning("No messages in request")
                 return data
 
-            # Always use default token for MCP server
+            # Always use default token as expected by MCP server
             auth_token = "default_token"
             logger.info("Using default token for MCP server")
             
@@ -168,38 +168,40 @@ class RAGHandler(CustomLogger):
             )
             
             # Only modify the request if we got valid context
-            if context and context.get("documents"):
-                logger.info(f"Got {len(context['documents'])} documents from MCP")
-                # Build the context string from documents
+            if context and context.get("context_items"):
+                logger.info(f"Got {len(context['context_items'])} context items from MCP")
+                # Build the context string from context items
                 context_parts = []
-                for doc in context["documents"]:
-                    source = doc.get("source", "unknown")
-                    content = doc.get("content", "")
+                for item in context["context_items"]:
+                    source = item.get("metadata", {}).get("source", "unknown")
+                    content = item.get("content", "")
                     if content:
-                        context_parts.append(f"[{source}] {content}")
+                        # Clean up the content by removing BOM and extra whitespace
+                        content = content.replace("\ufeff", "").strip()
+                        context_parts.append(f"[{source}]\n{content}\n")
                 
-                context_str = "\n".join(context_parts)
+                context_str = "\n\n".join(context_parts)
                 logger.info(f"Context string length: {len(context_str)}")
                 
                 # Find or create system message
                 system_messages = [msg for msg in messages if msg.get("role") == "system"]
                 if system_messages:
-                    # Just append the documents as reference
-                    system_messages[0]["content"] = f"{system_messages[0]['content']}\n\nReference documents:\n{context_str}"
+                    # Update the system message with context
+                    system_messages[0]["content"] = f"{system_messages[0]['content']}\n\nHere are some relevant documents to help answer the user's question:\n\n{context_str}"
                     logger.info("Updated existing system message with context")
                 else:
-                    # Create minimal system message with just the documents
+                    # Create new system message with context
                     messages.insert(0, {
                         "role": "system",
-                        "content": f"You are a helpful assistant. Reference documents:\n{context_str}"
+                        "content": f"You are a helpful assistant. Here are some relevant documents to help answer the user's question:\n\n{context_str}"
                     })
                     logger.info("Created new system message with context")
                 
                 # Update the request data
                 data["messages"] = messages
-                logger.info("Successfully injected context documents")
+                logger.info("Successfully injected context into request")
             else:
-                logger.info("No context documents received from MCP")
+                logger.info("No context items received from MCP")
             
         except Exception as e:
             logger.error(f"Error in pre_request_hook: {str(e)}", exc_info=True)
