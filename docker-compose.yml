@@ -56,7 +56,6 @@ services:
       - REDIS_PORT=6379
       - MCP_API_KEY=insight-mesh-mcp-abc-123
       - PYTHONPATH=/app
-      - LLM_API_KEY=sk-litellm-llm-key-123456  # Default key for LLM service
       - JWT_SECRET_KEY=your-super-secret-jwt-key-123  # Added JWT secret key
     volumes:
       - ./config/litellm_config.yaml:/app/config.yaml
@@ -227,7 +226,7 @@ services:
       # SLACK_APP_TOKEN is only needed for Socket Mode in the slack-bot service
       - SLACK_APP_TOKEN=${SLACK_APP_TOKEN}
       - LLM_API_URL=http://litellm:8000/v1
-      - LLM_API_KEY=${LLM_API_KEY}
+      - LLM_API_KEY=sk-litellm-master-key-123456  # Updated to use master key
       - LLM_MODEL=gpt-4
     depends_on:
       - litellm
