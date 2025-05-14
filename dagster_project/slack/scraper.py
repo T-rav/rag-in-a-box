@@ -109,8 +109,8 @@ class SlackScraper:
             self.logger.info(f"Scraping channel: {channel_name} ({channel_id})")
 
             # Get channel info and permissions
-            channel_info = self.client.get_channel_info(channel_id)
-            permissions = self.client.get_channel_permissions(channel_id)
+            channel_info = self._to_dict(self.client.get_channel_info(channel_id))
+            permissions = self._to_dict(self.client.get_channel_permissions(channel_id))
 
             # Get messages
             messages = self.client.get_channel_messages(
@@ -122,9 +122,9 @@ class SlackScraper:
             pins = []
             bookmarks = []
             if config.get("include_pins", True):
-                pins = self.client.get_channel_pins(channel_id)
+                pins = [self._to_dict(pin) for pin in self.client.get_channel_pins(channel_id)]
             if config.get("include_bookmarks", True):
-                bookmarks = self.client.get_channel_bookmarks(channel_id)
+                bookmarks = [self._to_dict(bookmark) for bookmark in self.client.get_channel_bookmarks(channel_id)]
 
             # Store channel data
             channel_data = {
