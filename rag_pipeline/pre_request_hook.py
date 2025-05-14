@@ -172,6 +172,7 @@ class RAGHandler(CustomLogger):
                 logger.info(f"Got {len(context['context_items'])} context items from MCP")
                 # Build the context string from context items
                 context_parts = []
+                document_sources = []  # Track document sources
                 for item in context["context_items"]:
                     source = item.get("metadata", {}).get("source", "unknown")
                     content = item.get("content", "")
@@ -179,21 +180,32 @@ class RAGHandler(CustomLogger):
                         # Clean up the content by removing BOM and extra whitespace
                         content = content.replace("\ufeff", "").strip()
                         context_parts.append(f"[{source}]\n{content}\n")
+                        if source != "system_context":  # Don't include system context in sources
+                            document_sources.append(source)
                 
                 context_str = "\n\n".join(context_parts)
                 logger.info(f"Context string length: {len(context_str)}")
+                
+                # Create a system message that instructs the model to cite sources
+                system_message = (
+                    "You are a helpful assistant. When answering questions, use the provided context to inform your response. "
+                    "Always cite your sources by mentioning which documents you used in your answer. "
+                    "Here are some relevant documents to help answer the user's question:\n\n"
+                    f"{context_str}\n\n"
+                    "Remember to explicitly mention which documents you used in your response."
+                )
                 
                 # Find or create system message
                 system_messages = [msg for msg in messages if msg.get("role") == "system"]
                 if system_messages:
                     # Update the system message with context
-                    system_messages[0]["content"] = f"{system_messages[0]['content']}\n\nHere are some relevant documents to help answer the user's question:\n\n{context_str}"
+                    system_messages[0]["content"] = system_message
                     logger.info("Updated existing system message with context")
                 else:
                     # Create new system message with context
                     messages.insert(0, {
                         "role": "system",
-                        "content": f"You are a helpful assistant. Here are some relevant documents to help answer the user's question:\n\n{context_str}"
+                        "content": system_message
                     })
                     logger.info("Created new system message with context")
                 
