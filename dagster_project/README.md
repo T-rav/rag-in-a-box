@@ -4,22 +4,20 @@ This project contains data import and processing pipelines using Dagster.
 
 ## Slack Import
 
-The Slack import pipeline allows importing data from a Slack workspace, including user information, channel details, and channel content.
+The Slack import pipeline allows importing data from a Slack workspace, including user information and channel content.
 
 ### Features
 
-- User information import (profiles, emails, etc.)
-- Channel information import (names, descriptions, etc.)
-- Channel content import (messages, pins, bookmarks, etc.)
-- Neo4j and Elasticsearch integration for data storage
-- Separate jobs for users and channels/content
+- User information import (profiles, emails, etc.) to PostgreSQL
+- Channel content import (messages, pins, bookmarks, etc.) to Elasticsearch and Neo4j
+- Separate jobs for users and channel content
 
 ### Running the Slack Import
 
 The Slack import is separated into two jobs:
 
-1. `slack_users_job`: Imports only user information
-2. `slack_channels_job`: Imports channel information and content
+1. `slack_users_job`: Imports user information into PostgreSQL
+2. `slack_channels_job`: Imports channel content into Elasticsearch and Neo4j
 
 #### Using Dagster UI
 
@@ -36,10 +34,10 @@ The Slack import is separated into two jobs:
 You can run jobs directly from the command line:
 
 ```bash
-# Import only user information
+# Import only user information to PostgreSQL
 dagster job execute -f slack_assets.py -a slack_users_job
 
-# Import channel information and content
+# Import channel content to Elasticsearch and Neo4j
 dagster job execute -f slack_assets.py -a slack_channels_job
 ```
 
@@ -48,17 +46,18 @@ dagster job execute -f slack_assets.py -a slack_channels_job
 The following schedules are configured:
 
 - `slack_users_schedule`: Runs the user import once per day
-- `slack_channels_schedule`: Runs the channel and content import every 6 hours
+- `slack_channels_schedule`: Runs the channel content import every 6 hours
 
 ### Configuration
 
 Slack import requires the following environment variables:
 
 - `SLACK_BOT_TOKEN`: OAuth token for the Slack API
-- `NEO4J_URI`: URI for Neo4j connection (e.g., `bolt://localhost:7687`)
+- `POSTGRES_CONNECTION_STRING`: Connection string for PostgreSQL (for user data)
+- `NEO4J_URI`: URI for Neo4j connection (for channel content)
 - `NEO4J_USER`: Neo4j username
 - `NEO4J_PASSWORD`: Neo4j password
-- `ELASTICSEARCH_HOST`: Elasticsearch host
+- `ELASTICSEARCH_HOST`: Elasticsearch host (for channel content)
 - `ELASTICSEARCH_PORT`: Elasticsearch port
 
 You can configure import behavior through the `SlackConfig` class parameters:
@@ -84,16 +83,26 @@ The pipelines handle:
 ## Setup
 
 1. Install dependencies:
-```bash
-pip install dagster dagster-webserver dagster-postgres google-api-python-client google-auth-httplib2 google-auth-oauthlib
-```
+   ```bash
+   pip install dagster dagster-webserver psycopg2-binary \
+               slack_sdk elasticsearch neo4j pandas
+   ```
 
-2. Configure Google Drive credentials in `.env` file or environment variables
+2. Configure environment variables:
+   ```bash
+   export SLACK_BOT_TOKEN=xoxb-your-token-here
+   export POSTGRES_CONNECTION_STRING=postgresql://user:password@localhost:5432/dbname
+   export NEO4J_URI=bolt://localhost:7687
+   export NEO4J_USER=neo4j
+   export NEO4J_PASSWORD=password
+   export ELASTICSEARCH_HOST=localhost
+   export ELASTICSEARCH_PORT=9200
+   ```
 
 3. Run the Dagster UI:
-```bash
-dagster dev
-```
+   ```bash
+   dagster dev
+   ```
 
 ## Pipelines
 

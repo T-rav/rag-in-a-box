@@ -6,7 +6,8 @@ from dagster import asset, AssetExecutionContext, MetadataValue, Config, Definit
 
 from slack.client import SlackClient
 from slack.scraper import SlackScraper
-from slack.utils import format_slack_message, format_slack_channel, format_slack_user
+from slack.utils import format_slack_user
+from slack.postgres_service import SlackPostgresService
 from slack.neo4j_service import SlackNeo4jService
 from slack.elastic_service import SlackElasticsearchService
 
@@ -26,21 +27,22 @@ class SlackConfig(Config):
 
 @asset
 def slack_users(context: AssetExecutionContext) -> pd.DataFrame:
-    """Get all Slack users and their information."""
+    """Get all Slack users and their information and store in PostgreSQL."""
     client = SlackClient()
     try:
         users = client.get_users()
         user_emails = client.get_user_emails()
         context.log.info(f"Found {len(users)} users, {len(user_emails)} with emails")
         
-        # Store user info in Neo4j and Elasticsearch
-        neo4j_service = SlackNeo4jService()
-        es_service = SlackElasticsearchService()
-        
+        # Format user data
+        formatted_users = []
         for user in users:
-            formatted_user = format_slack_user(user)
-            neo4j_service.create_or_update_user(formatted_user)
-            es_service.index_user(formatted_user)
+            formatted_users.append(format_slack_user(user))
+        
+        # Store user info in PostgreSQL
+        pg_service = SlackPostgresService()
+        pg_service.store_users(formatted_users)
+        context.log.info(f"Stored {len(formatted_users)} users in PostgreSQL")
         
         # Create DataFrame for user emails
         df = pd.DataFrame(user_emails)
@@ -52,32 +54,6 @@ def slack_users(context: AssetExecutionContext) -> pd.DataFrame:
         return df
     except Exception as e:
         context.log.error(f"Error getting user info: {e}")
-        raise
-
-@asset
-def slack_channel_info(context: AssetExecutionContext) -> Dict[str, Any]:
-    """Get information about all Slack channels."""
-    client = SlackClient()
-    try:
-        channels = client.get_public_channels()
-        context.log.info(f"Found {len(channels)} public channels")
-        
-        # Store channel info in Neo4j and Elasticsearch
-        neo4j_service = SlackNeo4jService()
-        es_service = SlackElasticsearchService()
-        
-        for channel in channels:
-            formatted_channel = format_slack_channel(channel)
-            neo4j_service.create_or_update_channel(formatted_channel)
-            es_service.index_channel(formatted_channel)
-        
-        context.add_output_metadata({
-            "num_channels": len(channels),
-            "channel_names": MetadataValue.json([c["name"] for c in channels[:5]])
-        })
-        return {"channels": channels}
-    except Exception as e:
-        context.log.error(f"Error getting channel info: {e}")
         raise
 
 @asset
@@ -138,7 +114,7 @@ slack_users_job = define_asset_job(
 
 slack_channels_job = define_asset_job(
     name="slack_channels_job",
-    selection=[slack_channel_info, scrape_slack_content]
+    selection=[scrape_slack_content]
 )
 
 # Define schedules
@@ -154,7 +130,7 @@ slack_channels_schedule = ScheduleDefinition(
 
 # Create definitions object
 defs = Definitions(
-    assets=[slack_users, slack_channel_info, scrape_slack_content],
+    assets=[slack_users, scrape_slack_content],
     schedules=[slack_users_schedule, slack_channels_schedule],
     jobs=[slack_users_job, slack_channels_job],
 )
