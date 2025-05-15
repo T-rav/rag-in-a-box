@@ -3,7 +3,7 @@ import sys
 import pytest
 import asyncio
 from faker import Faker
-from datetime import datetime
+from datetime import datetime, UTC
 import jwt
 
 # Add the parent directory to the path so we can import the application modules
@@ -24,12 +24,9 @@ from context_service import ContextService
 # Initialize faker for generating test data
 fake = Faker()
 
-@pytest.fixture
-def event_loop():
-    """Create an instance of the default event loop for each test case."""
-    loop = asyncio.get_event_loop_policy().new_event_loop()
-    yield loop
-    loop.close()
+# Remove the custom event_loop fixture to use pytest-asyncio's default
+# But still specify the scope explicitly to avoid the deprecation warning
+pytestmark = pytest.mark.asyncio(scope="function")
 
 @pytest.fixture
 def sample_document():
@@ -68,7 +65,7 @@ def sample_context_request(sample_user_info):
         "sub": sample_user_info.id,
         "email": sample_user_info.email,
         "name": sample_user_info.name,
-        "exp": datetime.now().timestamp() + 3600  # 1 hour expiration
+        "exp": datetime.now(UTC).timestamp() + 3600  # 1 hour expiration
     }
     token = jwt.encode(token_payload, "test_secret_key", algorithm="HS256")
     

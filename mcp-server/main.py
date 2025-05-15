@@ -3,7 +3,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
 from typing import Optional, Dict, Any, List
-from datetime import datetime
+from datetime import datetime, UTC
 import jwt
 from loguru import logger
 import os
@@ -22,6 +22,9 @@ from models import (
     ResponseMetadata,
     UserInfo
 )
+import uvicorn
+from functools import lru_cache
+from contextlib import asynccontextmanager
 
 # Load environment variables
 load_dotenv()
@@ -74,11 +77,32 @@ def log_context(user_id: Optional[str] = None, token_type: Optional[str] = None)
         context_filter.context["token_type"] = token_type
     request_context.set(current)
 
-# Initialize FastAPI app
+# Define lifespan context manager to replace on_event
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    # Startup code (was in startup_event)
+    try:
+        logger.info("MCP server started - Services initialized")
+    except Exception as e:
+        logger.error("Error during startup: {}", str(e))
+        raise
+    
+    yield  # Yield control to the application
+    
+    # Shutdown code (was in shutdown_event)
+    try:
+        # Clean up Elasticsearch connection
+        await context_service.close()
+        logger.info("MCP server stopped - Resources cleaned up")
+    except Exception as e:
+        logger.error("Error during shutdown: {}", str(e))
+
+# Create the FastAPI app
 app = FastAPI(
     title="Message Context Provider (MCP) Server",
     description="Server for providing context-aware responses based on user queries and conversation history",
-    version="1.0.0"
+    version="1.0.0",
+    lifespan=lifespan
 )
 
 # Add CORS middleware
@@ -269,27 +293,6 @@ async def validate_token(token: str, token_type: str) -> UserInfo:
             detail="Error processing token"
         )
 
-# Startup and shutdown events
-@app.on_event("startup")
-async def startup_event():
-    """Initialize services on startup"""
-    try:
-        # Just log that services are initialized
-        logger.info("MCP server started - Services initialized")
-    except Exception as e:
-        logger.error("Error during startup: {}", str(e))
-        raise
-
-@app.on_event("shutdown")
-async def shutdown_event():
-    """Clean up connections on shutdown"""
-    try:
-        # Clean up Elasticsearch connection
-        await context_service.close()
-        logger.info("MCP server stopped - Resources cleaned up")
-    except Exception as e:
-        logger.error("Error during shutdown: {}", str(e))
-
 @app.post("/context", response_model=ContextResponse)
 async def get_context(
     request: ContextRequest,
@@ -337,7 +340,7 @@ async def get_context(
         response_metadata = ResponseMetadata(
             user=user_info,
             token_type=request.token_type,
-            timestamp=datetime.utcnow().isoformat(),
+            timestamp=datetime.now(UTC).isoformat(),
             context_sources=[
                 ContextSource(type="documents", count=len(context_result.documents))
             ],
