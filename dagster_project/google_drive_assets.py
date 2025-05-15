@@ -23,10 +23,10 @@ from dagster import (
     AssetKey,
     EnvVar,
 )
-from google_drive.utils import compute_hash
-from google_drive.client import GoogleDriveClient
-from google_drive.neo4j_service import Neo4jService
-from google_drive.elastic_service import ElasticsearchService
+from .google_drive.utils import compute_hash
+from .google_drive.client import GoogleDriveClient
+from .google_drive.neo4j_service import Neo4jService
+from .google_drive.elastic_service import ElasticsearchService
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
