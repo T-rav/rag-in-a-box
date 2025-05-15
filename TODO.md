@@ -11,7 +11,7 @@
 - [x] **Forward to LiteLLM:**
   - Send messages with `X-Auth-Token: slack:{user_id}` header.
   - Use LiteLLM proxy for consistent handling with OpenWebUI.
-- [ ] **Test End-to-End:**
+- [ ] **Test End-to-End:** (HIGH PRIORITY)
   - Validate that the bot responds correctly
   - Verify auth token handling in RAG hook
   - Test user permissions and context retrieval
@@ -25,7 +25,7 @@
   - Create agent process definitions for common tasks
   - Add user-friendly status reporting
 
-## 1.1 Slack Agent Enhancements
+## 1.1 Slack Agent Enhancements (MEDIUM PRIORITY)
 - [ ] **Add More Agent Processes:**
   - Expand available agent processes to include data cleaning, analytics, and export functionality
   - Add specialized agents for different data sources
@@ -57,19 +57,21 @@
   - Handle both JWT and Slack auth tokens
   - Look up user info from appropriate sources
   - Apply permission filtering
-- [ ] **Test MCP Integration:**
+- [ ] **Test MCP Integration:** (HIGH PRIORITY)
   - Verify token handling for both auth types
   - Test user lookup and permission checks
   - Validate context retrieval and enrichment
   - Monitor performance and error rates
-- [ ] **(Future) Agent Management:**
-  - Design endpoints for managing and visualizing business ops agents.
-- [ ] **Document API Contracts:**
+- [ ] **Agent Management:** (MEDIUM PRIORITY)
+  - Design endpoints for managing and visualizing business ops agents
+  - Implement job scheduling and management API
+  - Create monitoring endpoints for job status tracking
+- [ ] **Document API Contracts:** (HIGH PRIORITY)
   - Document auth token formats
   - Document request/response formats
   - Document integration points with LiteLLM
 
-## 3. Infrastructure
+## 3. Infrastructure (HIGH PRIORITY)
 - [ ] **Monitoring:**
   - Set up logging for auth token handling
   - Monitor token validation success/failure rates
@@ -80,8 +82,13 @@
   - Audit permission checks
   - Monitor for unusual access patterns
   - Regular security reviews
+- [ ] **Deployment:**
+  - Finalize Docker container configurations
+  - Set up container orchestration
+  - Implement CI/CD pipeline for automated testing and deployment
+  - Document deployment procedures
 
-## 4. Search & NLP Improvements
+## 4. Search & NLP Improvements (LOW PRIORITY)
 - [ ] **Entity Extraction Pipeline:**
   - Implement NLP entity extraction during indexing
   - Extract key entities (people, organizations, topics, etc.)
@@ -102,3 +109,17 @@
   - Modify context retrieval to leverage entities
   - Add entity-based filtering options
   - Update RAG prompt to use entity context
+
+## 5. Testing & Documentation (HIGH PRIORITY)
+- [ ] **End-to-End Testing:**
+  - Create comprehensive test plan
+  - Implement automated testing for critical paths
+  - Document testing procedures and expected results
+- [ ] **User Documentation:**
+  - Create user guides for Slack interaction
+  - Document available commands and agent processes
+  - Provide troubleshooting information
+- [ ] **Developer Documentation:**
+  - Document system architecture
+  - Create API documentation
+  - Document deployment and maintenance procedures
