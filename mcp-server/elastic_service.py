@@ -3,6 +3,7 @@ from typing import Dict, Any, List, Optional
 import os
 from loguru import logger
 import json
+from models import Document, DocumentMetadata
 
 class ElasticsearchService:
     def __init__(self):
@@ -22,7 +23,7 @@ class ElasticsearchService:
         user_email: str = None,  # Will be used for permission filtering
         size: int = 5,
         indices: List[str] = ["google_drive_files", "slack_messages", "web_pages"]
-    ) -> List[Dict[str, Any]]:
+    ) -> List[Document]:
         """
         Search for documents across multiple indices with permission filtering based on user_email.
         """
@@ -77,29 +78,35 @@ class ElasticsearchService:
             response_dict = response.body
             logger.info("Elasticsearch response: {}", json.dumps(response_dict, indent=2))
             
-            # Process and format the results
+            # Process and format the results using Pydantic models
             results = []
             for hit in response_dict["hits"]["hits"]:
                 score = hit["_score"]
                 source = hit["_source"]
                 
                 # Extract relevant metadata
-                metadata = source.get("meta", {})
-                result = {
-                    "id": hit["_id"],
-                    "content": source.get("content", ""),  # Access content directly from _source
-                    "score": score,
-                    "metadata": {
-                        "source": metadata.get("source", "unknown"),
-                        "file_name": metadata.get("file_name"),
-                        "created_time": metadata.get("created_time"),
-                        "modified_time": metadata.get("modified_time"),
-                        "web_link": metadata.get("web_link"),
-                        "permissions": metadata.get("permissions", []),
-                        "is_public": metadata.get("is_public", False)
-                    }
-                }
-                results.append(result)
+                meta = source.get("meta", {})
+                
+                # Create DocumentMetadata model
+                metadata = DocumentMetadata(
+                    source=meta.get("source", "unknown"),
+                    file_name=meta.get("file_name"),
+                    created_time=meta.get("created_time"),
+                    modified_time=meta.get("modified_time"),
+                    web_link=meta.get("web_link"),
+                    permissions=meta.get("permissions", []),
+                    is_public=meta.get("is_public", False)
+                )
+                
+                # Create Document model
+                document = Document(
+                    id=hit["_id"],
+                    content=source.get("content", ""),
+                    score=score,
+                    metadata=metadata
+                )
+                
+                results.append(document)
                 
             logger.info("Found {} relevant documents after permission filtering", len(results))
             return results

@@ -13,6 +13,15 @@ from functools import wraps
 import time
 import json
 from context_service import context_service
+from models import (
+    ContextRequest,
+    ContextResponse,
+    ContextItem,
+    ContextSource,
+    RetrievalMetadata,
+    ResponseMetadata,
+    UserInfo
+)
 
 # Load environment variables
 load_dotenv()
@@ -147,24 +156,6 @@ async def log_requests_middleware(request: Request, call_next):
         )
         raise
 
-# Models
-class ContextRequest(BaseModel):
-    auth_token: str = Field(..., description="JWT token for user authentication")
-    token_type: str = Field(..., description="Type of JWT token (e.g., OpenWebUI)")
-    prompt: str = Field(..., description="User's current prompt")
-    history_summary: Optional[str] = Field(None, description="Summary of conversation history")
-
-class ContextItem(BaseModel):
-    """A single context item to be injected into the conversation"""
-    content: str = Field(..., description="The content to be injected")
-    role: str = Field("system", description="The role of the context (system, user, assistant)")
-    metadata: Dict[str, Any] = Field(default_factory=dict, description="Additional metadata about this context item")
-
-class ContextResponse(BaseModel):
-    """Response following the MCP protocol"""
-    context_items: List[ContextItem] = Field(..., description="List of context items to be injected into the conversation")
-    metadata: Dict[str, Any] = Field(default_factory=dict, description="Additional metadata about the context retrieval")
-
 # Configuration
 class Settings:
     MCP_API_KEY: str = os.getenv("MCP_API_KEY", "")
@@ -185,7 +176,7 @@ async def verify_api_key(x_api_key: str = Header(...)) -> None:
             detail="Invalid API key"
         )
 
-async def validate_token(token: str, token_type: str) -> Dict[str, Any]:
+async def validate_token(token: str, token_type: str) -> UserInfo:
     """Validate and decode the JWT token"""
     try:
         log_context(token_type=token_type)
@@ -194,13 +185,13 @@ async def validate_token(token: str, token_type: str) -> Dict[str, Any]:
         # Handle default token
         if token == "default_token":
             logger.info("Using default token with default email for permission filtering")
-            return {
-                "user_id": "default_user",
-                "email": "tmfrisinger@gmail.com",  # Default email for permission filtering
-                "name": "Default User",
-                "is_active": True,
-                "token_type": token_type
-            }
+            return UserInfo(
+                id="default_user",
+                email="tmfrisinger@gmail.com",  # Default email for permission filtering
+                name="Default User",
+                is_active=True,
+                token_type=token_type
+            )
         
         # For OpenWebUI tokens, we don't verify the signature
         if token_type == "OpenWebUI":
@@ -217,12 +208,14 @@ async def validate_token(token: str, token_type: str) -> Dict[str, Any]:
                     detail="Invalid OpenWebUI token: missing user ID"
                 )
             # Use default email for permission filtering
-            decoded["user_id"] = user_id
-            decoded["email"] = "tmfrisinger@gmail.com"  # Default email for permission filtering
-            decoded["name"] = "Default User"
-            decoded["is_active"] = True
-            logger.info(f"Using default email for permission filtering: {decoded['email']}")
-            return decoded
+            logger.info(f"Using default email for permission filtering")
+            return UserInfo(
+                id=user_id,
+                email="tmfrisinger@gmail.com",  # Default email for permission filtering
+                name="Default User",
+                is_active=True,
+                token_type=token_type
+            )
         elif token_type == "Slack":
             if not token.startswith("slack:"):
                 logger.error("Invalid Slack token format")
@@ -234,15 +227,14 @@ async def validate_token(token: str, token_type: str) -> Dict[str, Any]:
             log_context(user_id=user_id)
             logger.info("Extracted Slack user_id from token")
             # Use default email for permission filtering
-            decoded = {
-                "user_id": user_id,
-                "email": "tmfrisinger@gmail.com",  # Default email for permission filtering
-                "name": "Default User",
-                "is_active": True,
-                "token_type": "Slack"
-            }
-            logger.info(f"Using default email for permission filtering: {decoded['email']}")
-            return decoded
+            logger.info(f"Using default email for permission filtering")
+            return UserInfo(
+                id=user_id,
+                email="tmfrisinger@gmail.com",  # Default email for permission filtering
+                name="Default User",
+                is_active=True,
+                token_type=token_type
+            )
         else:
             logger.info("Validating token with signature verification")
             decoded = jwt.decode(token, settings.JWT_SECRET_KEY, algorithms=["HS256"])
@@ -256,9 +248,14 @@ async def validate_token(token: str, token_type: str) -> Dict[str, Any]:
                     status_code=401,
                     detail="Invalid token: missing user ID"
                 )
-            decoded["user_id"] = user_id
+            return UserInfo(
+                id=user_id,
+                email=decoded.get("email"),
+                name=decoded.get("name"),
+                is_active=decoded.get("is_active", True),
+                token_type=token_type
+            )
         logger.info("Token validation successful")
-        return decoded
     except jwt.InvalidTokenError as e:
         logger.error("Invalid token error: {}", str(e))
         raise HTTPException(
@@ -277,15 +274,8 @@ async def validate_token(token: str, token_type: str) -> Dict[str, Any]:
 async def startup_event():
     """Initialize services on startup"""
     try:
-        # Initialize cache
-        # await cache.connect()
-        # logger.info("Cache initialized")
-        # --- DB pool initialization commented out ---
-        # await get_db_pool()
-        # logger.info("Database pool initialized")
-        # Initialize Elasticsearch service
-        # Note: The Elasticsearch service is initialized in the ContextService
-        logger.info("Services initialized")
+        # Just log that services are initialized
+        logger.info("MCP server started - Services initialized")
     except Exception as e:
         logger.error("Error during startup: {}", str(e))
         raise
@@ -294,15 +284,9 @@ async def startup_event():
 async def shutdown_event():
     """Clean up connections on shutdown"""
     try:
-        # await cache.disconnect()
-        # logger.info("Cache disconnected")
-        # if db_pool:
-        #     await db_pool.close()
-        #     logger.info("Database pool closed")
-        # Close Elasticsearch service
-        # await context_service.close()
-        # logger.info("Elasticsearch service closed")
-        pass
+        # Clean up Elasticsearch connection
+        await context_service.close()
+        logger.info("MCP server stopped - Resources cleaned up")
     except Exception as e:
         logger.error("Error during shutdown: {}", str(e))
 
@@ -323,57 +307,52 @@ async def get_context(
         
         # Validate the token and get user info
         user_info = await validate_token(request.auth_token, request.token_type)
-        user_id = user_info["user_id"]
+        user_id = user_info.id
         log_context(user_id=user_id)
         logger.info(f"User authenticated: {user_id}")
         
         # Get context for the prompt using ContextService (this will search Elasticsearch)
-        context = await context_service.get_context_for_prompt(
+        context_result = await context_service.get_context_for_prompt(
             user_id=user_id,
             prompt=request.prompt,
             history_summary=request.history_summary,
             user_info=user_info
         )
-        logger.info(f"Context retrieved - Cache hit: {context.get('cache_hit', False)}, "
-                   f"Retrieval time: {context.get('retrieval_time_ms', 0)}ms, "
-                   f"Documents: {len(context.get('documents', []))}")
         
-        context_items = []
-        # Add system context if present
-        if context.get("system_context"):
-            logger.debug("Adding system context to response")
-            context_items.append(ContextItem(
-                content=context["system_context"],
-                role="system",
-                metadata={"source": "system_context"}
-            ))
-        # Add document contexts
-        for doc in context.get("documents", []):
-            context_items.append(ContextItem(
-                content=doc["content"],
-                role="system",
-                metadata={"source": doc.get("source", "document")}
-            ))
+        logger.info(f"Context retrieved - Cache hit: {context_result.cache_hit}, "
+                   f"Retrieval time: {context_result.retrieval_time_ms}ms, "
+                   f"Documents: {len(context_result.documents)}")
         
+        # Convert document results to context items
+        context_items = [
+            ContextItem(
+                content=doc.content,
+                role="system",
+                metadata={"source": doc.source}
+            )
+            for doc in context_result.documents
+        ]
+        
+        # Create response metadata
+        response_metadata = ResponseMetadata(
+            user=user_info,
+            token_type=request.token_type,
+            timestamp=datetime.utcnow().isoformat(),
+            context_sources=[
+                ContextSource(type="documents", count=len(context_result.documents))
+            ],
+            retrieval_metadata=RetrievalMetadata(
+                cache_hit=context_result.cache_hit,
+                retrieval_time_ms=context_result.retrieval_time_ms
+            )
+        )
+        
+        # Create and return the response
         response = ContextResponse(
             context_items=context_items,
-            metadata={
-                "user": {
-                    "id": user_id,
-                    "email": user_info.get("email"),
-                    "name": user_info.get("name")
-                },
-                "token_type": request.token_type,
-                "timestamp": datetime.utcnow().isoformat(),
-                "context_sources": [
-                    {"type": "documents", "count": len(context.get("documents", []))}
-                ],
-                "retrieval_metadata": {
-                    "cache_hit": bool(context.get("cache_hit", False)),
-                    "retrieval_time_ms": context.get("retrieval_time_ms", 0)
-                }
-            }
+            metadata=response_metadata
         )
+        
         logger.info(f"Returning response with {len(context_items)} context items")
         return response
         
