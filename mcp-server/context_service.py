@@ -39,8 +39,8 @@ class ContextService:
             # Create document results using Pydantic models
             document_results = [
                 DocumentResult(
-                    content=doc["content"],
-                    source=doc["metadata"].get("source", "unknown").split("_")[0]  # google_drive_files -> google_drive
+                    content=doc.content,
+                    source=self._transform_source(doc.metadata.source) if doc.metadata and doc.metadata.source else "unknown"
                 )
                 for doc in documents
             ]
@@ -61,6 +61,21 @@ class ContextService:
     async def close(self):
         """Clean up resources"""
         await self.es.close()
+
+    def _transform_source(self, source: str) -> str:
+        """Transform source name from raw format to user-friendly format
+        For example:
+        - google_drive_files -> google_drive
+        - slack_messages -> slack
+        """
+        if source.startswith("google_drive"):
+            return "google_drive"
+        elif source.startswith("slack"):
+            return "slack"
+        else:
+            # For other sources, return as is or use the first part
+            parts = source.split("_", 1)
+            return parts[0]
 
 # Create global context service instance
 context_service = ContextService() 
