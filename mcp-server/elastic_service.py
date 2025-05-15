@@ -19,24 +19,53 @@ class ElasticsearchService:
     async def search_documents(
         self,
         query: str,
-        user_email: str = None,  # keep for compatibility but unused
+        user_email: str = None,  # Will be used for permission filtering
         size: int = 5,
-        indices: List[str] = ["google_drive_files", "slack_messages", "web_pages"]  # Restored multiple indices
+        indices: List[str] = ["google_drive_files", "slack_messages", "web_pages"]
     ) -> List[Dict[str, Any]]:
         """
-        Search for documents across multiple indices using a simple match_all query.
+        Search for documents across multiple indices with permission filtering based on user_email.
         """
         try:
-            # Build a simple match_all query similar to the working curl command
-            search_body = {
-                "query": {
-                    "multi_match": {
-                        "query": query,
-                        "fields": ["content"]
-                    }
-                },
-                "size": size
-            }
+            # Build the search query with permission filtering if user_email is provided
+            if user_email:
+                logger.info(f"Searching documents with permission filtering for email: {user_email}")
+                # Build a query that includes email-based permission filtering
+                search_body = {
+                    "query": {
+                        "bool": {
+                            "must": {
+                                "multi_match": {
+                                    "query": query,
+                                    "fields": ["content"]
+                                }
+                            },
+                            "should": [
+                                # Match public documents
+                                {"term": {"meta.is_public": True}},
+                                # Match documents where user's email is in accessible_by_emails
+                                {"term": {"meta.accessible_by_emails.keyword": user_email}},
+                                # Match domain-based access if the user's email contains a domain
+                                # e.g., if user_email is "user@example.com", match documents accessible by "example.com"
+                                {"term": {"meta.accessible_by_domains.keyword": user_email.split("@")[1] if "@" in user_email else ""}},
+                            ],
+                            "minimum_should_match": 1
+                        }
+                    },
+                    "size": size
+                }
+            else:
+                # Without user_email, fall back to the simple query with no permission filtering
+                logger.info("No user email provided, searching without permission filtering")
+                search_body = {
+                    "query": {
+                        "multi_match": {
+                            "query": query,
+                            "fields": ["content"]
+                        }
+                    },
+                    "size": size
+                }
             
             logger.info("Executing Elasticsearch query with body: {}", json.dumps(search_body, indent=2))
             response = await self.es.search(
@@ -72,7 +101,7 @@ class ElasticsearchService:
                 }
                 results.append(result)
                 
-            logger.info("Found {} relevant documents (no user filter)", len(results))
+            logger.info("Found {} relevant documents after permission filtering", len(results))
             return results
             
         except Exception as e:

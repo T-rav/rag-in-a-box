@@ -193,10 +193,10 @@ async def validate_token(token: str, token_type: str) -> Dict[str, Any]:
         
         # Handle default token
         if token == "default_token":
-            logger.info("Using default token with default email")
+            logger.info("Using default token with default email for permission filtering")
             return {
                 "user_id": "default_user",
-                "email": "tmfrisinger@gmail.com",
+                "email": "tmfrisinger@gmail.com",  # Default email for permission filtering
                 "name": "Default User",
                 "is_active": True,
                 "token_type": token_type
@@ -216,11 +216,12 @@ async def validate_token(token: str, token_type: str) -> Dict[str, Any]:
                     status_code=401,
                     detail="Invalid OpenWebUI token: missing user ID"
                 )
-            # Instead, always use default user
+            # Use default email for permission filtering
             decoded["user_id"] = user_id
-            decoded["email"] = "tmfrisinger@gmail.com"
+            decoded["email"] = "tmfrisinger@gmail.com"  # Default email for permission filtering
             decoded["name"] = "Default User"
             decoded["is_active"] = True
+            logger.info(f"Using default email for permission filtering: {decoded['email']}")
             return decoded
         elif token_type == "Slack":
             if not token.startswith("slack:"):
@@ -232,14 +233,15 @@ async def validate_token(token: str, token_type: str) -> Dict[str, Any]:
             user_id = token.split(":", 1)[1]
             log_context(user_id=user_id)
             logger.info("Extracted Slack user_id from token")
-            # Instead, always use default user
+            # Use default email for permission filtering
             decoded = {
                 "user_id": user_id,
-                "email": "tmfrisinger@gmail.com",
+                "email": "tmfrisinger@gmail.com",  # Default email for permission filtering
                 "name": "Default User",
                 "is_active": True,
                 "token_type": "Slack"
             }
+            logger.info(f"Using default email for permission filtering: {decoded['email']}")
             return decoded
         else:
             logger.info("Validating token with signature verification")

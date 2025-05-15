@@ -188,11 +188,14 @@ class RAGHandler(CustomLogger):
                 
                 # Create a system message that instructs the model to cite sources
                 system_message = (
-                    "You are a helpful assistant. When answering questions, use the provided context to inform your response. "
-                    "Always cite your sources by mentioning which documents you used in your answer. "
-                    "Here are some relevant documents to help answer the user's question:\n\n"
+                    "You are a helpful assistant that MUST cite sources in EVERY response. "
+                    "IMPORTANT: You MUST explicitly mention which documents you used in your answer. "
+                    "Format your response like this:\n\n"
+                    "1. First, provide your answer\n"
+                    "2. Then, on a new line, write 'Sources used:' followed by a list of the document sources you referenced\n\n"
+                    "Here are the relevant documents to help answer the user's question:\n\n"
                     f"{context_str}\n\n"
-                    "Remember to explicitly mention which documents you used in your response."
+                    "REMEMBER: You MUST cite your sources in EVERY response. If you don't cite sources, your response is incomplete."
                 )
                 
                 # Find or create system message

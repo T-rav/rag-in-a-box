@@ -58,15 +58,14 @@ class ContextService:
         #     cached_context["retrieval_time_ms"] = int((time.time() - start_time) * 1000)
         #     return cached_context
         
-        # Ignore user_email for permission filtering
-        # user_email = user_info.get("email") if user_info else None
-        user_email = None
-        # if not user_email:
-        #     logger.warning("No user email provided for context retrieval")
-        #     return {"documents": [], "retrieval_time_ms": int((time.time() - start_time) * 1000)}
+        # Use user_email for permission filtering
+        user_email = user_info.get("email") if user_info else None
+        if not user_email:
+            logger.warning("No user email provided for context retrieval")
+            return {"documents": [], "retrieval_time_ms": int((time.time() - start_time) * 1000)}
         
         try:
-            # Search for relevant documents (no user filter)
+            # Search for relevant documents with user filter
             documents = await self.es.search_documents(
                 query=prompt,
                 user_email=user_email,
