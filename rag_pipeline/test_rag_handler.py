@@ -2,10 +2,12 @@ import asyncio
 from litellm import completion
 import os
 from dotenv import load_dotenv
+import pytest
 
 # Load environment variables
 load_dotenv()
 
+@pytest.mark.asyncio
 async def test_full_rag_handler():
     """Test the complete RAG handler with a real request"""
     print("\n=== Testing Full RAG Handler ===")

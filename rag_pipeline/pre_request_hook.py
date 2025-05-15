@@ -9,19 +9,30 @@ import logging
 logger = logging.getLogger("rag_handler")
 logger.setLevel(logging.INFO)
 
-# (Optional) Create a file handler (writing to /app/rag_handler.log) and set its level to INFO.
-fh = logging.FileHandler("/app/rag_handler.log")
-fh.setLevel(logging.INFO)
+# Determine log file path based on environment
+LOG_DIR = "/app" if os.path.exists("/app") else os.path.dirname(os.path.abspath(__file__))
+LOG_FILE = os.path.join(LOG_DIR, "rag_handler.log")
 
-# (Optional) Create a formatter (for example, "%(asctime)s – %(name)s – %(levelname)s – %(message)s") and assign it to the file handler.
-formatter = logging.Formatter("%(asctime)s – %(name)s – %(levelname)s – %(message)s")
-fh.setFormatter(formatter)
+# Create a console handler to output logs to stdout
+console_handler = logging.StreamHandler(sys.stdout)
+console_handler.setLevel(logging.INFO)
+console_formatter = logging.Formatter("%(asctime)s - %(name)s - %(levelname)s - %(message)s")
+console_handler.setFormatter(console_formatter)
+logger.addHandler(console_handler)
 
-# (Optional) Add the file handler to our custom logger.
-logger.addHandler(fh)
+try:
+    # Try to create a file handler, but don't fail if it's not possible
+    file_handler = logging.FileHandler(LOG_FILE)
+    file_handler.setLevel(logging.INFO)
+    file_formatter = logging.Formatter("%(asctime)s – %(name)s – %(levelname)s – %(message)s")
+    file_handler.setFormatter(file_formatter)
+    logger.addHandler(file_handler)
+    logger.info(f"File logging enabled: {LOG_FILE}")
+except Exception as e:
+    logger.warning(f"Could not set up file logging to {LOG_FILE}: {e}")
 
-# (Optional) Log (or "print") a message at the very top (outside of any function) so that if the module is imported (even "lazy" or "dynamic") you'll see that log.
-logger.info("!!! RAG HANDLER MODULE LOADED (using file logger) !!!")
+# Log a message that the module has been loaded
+logger.info("!!! RAG HANDLER MODULE LOADED !!!")
 
 from litellm.integrations.custom_logger import CustomLogger
 from litellm.proxy.proxy_server import UserAPIKeyAuth, DualCache

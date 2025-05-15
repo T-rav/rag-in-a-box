@@ -1,4 +1,6 @@
-litellm>=1.0.0
+litellm[proxy]>=1.0.0  # Using proxy features
 aiohttp>=3.8.0  # For async HTTP requests to MCP server
 python-dotenv>=1.0.0
-logging>=0.4.9 
+logging>=0.4.9
+orjson>=3.9.7  # Required by litellm proxy
+pytest-asyncio>=0.26.0  # For async tests 
