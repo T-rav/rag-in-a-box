@@ -16,6 +16,32 @@
   - Verify auth token handling in RAG hook
   - Test user permissions and context retrieval
   - Ensure proper error handling and logging
+- [x] **Implement AI Apps Features:**
+  - Configure bot with new Slack AI Apps capabilities
+  - Set up suggested prompts and thread status indicators
+  - Migrate from Socket Mode to new AI Apps framework
+- [x] **Add Agent Process Support:**
+  - Implement background process execution from Slack
+  - Create agent process definitions for common tasks
+  - Add user-friendly status reporting
+
+## 1.1 Slack Agent Enhancements
+- [ ] **Add More Agent Processes:**
+  - Expand available agent processes to include data cleaning, analytics, and export functionality
+  - Add specialized agents for different data sources
+  - Implement parameterized processes that accept user inputs
+- [ ] **Process Monitoring:**
+  - Implement comprehensive job monitoring system for tracking progress of long-running jobs
+  - Add notifications when jobs complete or encounter errors
+  - Create job status dashboard accessible through bot commands
+- [ ] **Process Output Reporting:**
+  - Add automatic reporting capabilities that share job results directly in Slack
+  - Include visualizations and summary statistics in reports
+  - Allow reports to be saved and shared with team members
+- [ ] **User-Specific Job History:**
+  - Maintain per-user job history for review and auditing
+  - Allow users to easily rerun previous jobs with same parameters
+  - Implement job templates based on common usage patterns
 
 ## 2. MCP Server
 - [x] **Scaffold API Server:**
