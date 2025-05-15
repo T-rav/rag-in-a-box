@@ -28,4 +28,4 @@ ENV PYTHONUNBUFFERED=1 \
     PYTHONDONTWRITEBYTECODE=1
 
 # Run the application
-CMD ["python", "app.py"] 
+CMD ["python", "app_ai.py"] 
