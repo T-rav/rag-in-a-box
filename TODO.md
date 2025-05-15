@@ -57,11 +57,11 @@
   - Handle both JWT and Slack auth tokens
   - Look up user info from appropriate sources
   - Apply permission filtering
-- [ ] **Test MCP Integration:** (HIGH PRIORITY)
+- [x] **Test MCP Integration:** (HIGH PRIORITY)
   - Verify token handling for both auth types
   - Test user lookup and permission checks
   - Validate context retrieval and enrichment
-  - Monitor performance and error rates
+  - Implement comprehensive test suite with test coverage reporting
 - [ ] **Agent Management:** (MEDIUM PRIORITY)
   - Design endpoints for managing and visualizing business ops agents
   - Implement job scheduling and management API
@@ -111,8 +111,13 @@
   - Update RAG prompt to use entity context
 
 ## 5. Testing & Documentation (HIGH PRIORITY)
-- [ ] **End-to-End Testing:**
+- [x] **MCP Server Testing:**
   - Create comprehensive test plan
+  - Implement unit tests for all components
+  - Set up test coverage reporting
+  - Document test scenarios and expectations
+- [ ] **End-to-End Testing:**
+  - Create comprehensive test plan for the entire system
   - Implement automated testing for critical paths
   - Document testing procedures and expected results
 - [ ] **User Documentation:**

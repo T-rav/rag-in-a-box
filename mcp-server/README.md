@@ -249,7 +249,12 @@ Cache TTL is configurable via the `CACHE_TTL` environment variable (default: 1 h
 
 2. Run tests:
    ```bash
-   pytest
+   ./run_tests.sh
+   ```
+   
+   Or manually:
+   ```bash
+   python -m pytest tests/ -v --cov=. --cov-report=term-missing
    ```
 
 3. Run linting:
@@ -257,6 +262,73 @@ Cache TTL is configurable via the `CACHE_TTL` environment variable (default: 1 h
    flake8
    black .
    ```
+
+## Testing
+
+The MCP server has a comprehensive test suite covering all major components:
+
+- **ElasticsearchService**: Tests for proper querying with user permission filtering
+- **ContextService**: Tests for context retrieval and handling of various scenarios
+- **API Endpoints**: Tests for API functionality, authentication, and error handling
+
+### Test Structure
+
+```
+mcp-server/
+├── tests/
+│   ├── conftest.py           # Common fixtures and test setup
+│   ├── test_elastic_service.py  # Tests for Elasticsearch service
+│   ├── test_context_service.py  # Tests for Context service
+│   └── test_main.py          # Tests for API endpoints
+```
+
+### Test Coverage
+
+The tests aim to cover:
+
+- Authentication and authorization flows
+- Context retrieval with proper permission filtering
+- Error handling and edge cases
+- Response formatting according to the MCP protocol
+
+### Setting Up for Testing
+
+1. Create a virtual environment (if not already created):
+   ```bash
+   python -m venv venv
+   source venv/bin/activate
+   ```
+
+2. Install development dependencies:
+   ```bash
+   pip install -r requirements-dev.txt
+   ```
+
+### Running Tests
+
+To run all tests:
+```bash
+./run_tests.sh
+```
+
+To run a specific test file:
+```bash
+python -m pytest tests/test_elastic_service.py -v
+```
+
+To run a specific test:
+```bash
+python -m pytest tests/test_elastic_service.py::TestElasticsearchService::test_search_documents_with_email -v
+```
+
+### Running Tests with Coverage
+
+To run tests with coverage reporting:
+```bash
+python -m pytest tests/ -v --cov=. --cov-report=term-missing
+```
+
+This will show which lines of code are covered by the tests and which are not.
 
 ## Docker Support
 
