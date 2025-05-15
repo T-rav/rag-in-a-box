@@ -24,48 +24,7 @@ class SlackConfig(Config):
     include_links: bool = True
     max_recursion_depth: int = 5
 
-@asset(group_name="slack_imports")
-def slack_test_message(context: AssetExecutionContext) -> str:
-    """Test the Slack connection by sending a message."""
-    client = SlackClient()
-    try:
-        response = client.send_message(
-            channel=os.getenv("SLACK_TEST_CHANNEL", "general"),
-            text="Testing Slack integration for Insight Mesh"
-        )
-        context.log.info("Successfully sent test message to Slack")
-        return "Successfully sent test message to Slack"
-    except Exception as e:
-        context.log.error(f"Error sending test message to Slack: {e}")
-        raise
-
-@asset(group_name="slack_imports")
-def slack_channel_info(context: AssetExecutionContext) -> Dict[str, Any]:
-    """Get information about all Slack channels."""
-    client = SlackClient()
-    try:
-        channels = client.get_public_channels()
-        context.log.info(f"Found {len(channels)} public channels")
-        
-        # Store channel info in Neo4j and Elasticsearch
-        neo4j_service = SlackNeo4jService()
-        es_service = SlackElasticsearchService()
-        
-        for channel in channels:
-            formatted_channel = format_slack_channel(channel)
-            neo4j_service.create_or_update_channel(formatted_channel)
-            es_service.index_channel(formatted_channel)
-        
-        context.add_output_metadata({
-            "num_channels": len(channels),
-            "channel_names": MetadataValue.json([c["name"] for c in channels[:5]])
-        })
-        return {"channels": channels}
-    except Exception as e:
-        context.log.error(f"Error getting channel info: {e}")
-        raise
-
-@asset(group_name="slack_imports")
+@asset
 def slack_users(context: AssetExecutionContext) -> pd.DataFrame:
     """Get all Slack users and their information."""
     client = SlackClient()
@@ -95,7 +54,33 @@ def slack_users(context: AssetExecutionContext) -> pd.DataFrame:
         context.log.error(f"Error getting user info: {e}")
         raise
 
-@asset(group_name="slack_imports")
+@asset
+def slack_channel_info(context: AssetExecutionContext) -> Dict[str, Any]:
+    """Get information about all Slack channels."""
+    client = SlackClient()
+    try:
+        channels = client.get_public_channels()
+        context.log.info(f"Found {len(channels)} public channels")
+        
+        # Store channel info in Neo4j and Elasticsearch
+        neo4j_service = SlackNeo4jService()
+        es_service = SlackElasticsearchService()
+        
+        for channel in channels:
+            formatted_channel = format_slack_channel(channel)
+            neo4j_service.create_or_update_channel(formatted_channel)
+            es_service.index_channel(formatted_channel)
+        
+        context.add_output_metadata({
+            "num_channels": len(channels),
+            "channel_names": MetadataValue.json([c["name"] for c in channels[:5]])
+        })
+        return {"channels": channels}
+    except Exception as e:
+        context.log.error(f"Error getting channel info: {e}")
+        raise
+
+@asset
 def scrape_slack_content(context: AssetExecutionContext, config: SlackConfig) -> Dict[str, Any]:
     """Scrape Slack content including messages, reactions, and files."""
     client = SlackClient()
@@ -145,21 +130,31 @@ def scrape_slack_content(context: AssetExecutionContext, config: SlackConfig) ->
         context.log.error(f"Error scraping Slack content: {e}")
         raise
 
-# Define jobs
-slack_scraping_job = define_asset_job(
-    name="slack_scraping_job",
-    selection=[scrape_slack_content]
+# Define two simple jobs 
+slack_users_job = define_asset_job(
+    name="slack_users_job",
+    selection=[slack_users]
+)
+
+slack_channels_job = define_asset_job(
+    name="slack_channels_job",
+    selection=[slack_channel_info, scrape_slack_content]
 )
 
 # Define schedules
-slack_schedule = ScheduleDefinition(
-    job=slack_scraping_job,
+slack_users_schedule = ScheduleDefinition(
+    job=slack_users_job,
+    cron_schedule="0 0 * * *",  # Run once a day
+)
+
+slack_channels_schedule = ScheduleDefinition(
+    job=slack_channels_job,
     cron_schedule="0 */6 * * *",  # Run every 6 hours
 )
 
 # Create definitions object
 defs = Definitions(
-    assets=[slack_test_message, slack_channel_info, slack_users, scrape_slack_content],
-    schedules=[slack_schedule],
-    jobs=[slack_scraping_job],
+    assets=[slack_users, slack_channel_info, scrape_slack_content],
+    schedules=[slack_users_schedule, slack_channels_schedule],
+    jobs=[slack_users_job, slack_channels_job],
 )
