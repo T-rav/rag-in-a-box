@@ -20,12 +20,30 @@ LLM_API_URL = os.environ.get("LLM_API_URL", "http://localhost:8000/v1")
 LLM_API_KEY = os.environ.get("LLM_API_KEY", "")
 LLM_MODEL = os.environ.get("LLM_MODEL", "gpt-4")
 
-# Default suggested prompts
+# Default suggested prompts - now including agent actions
 DEFAULT_PROMPTS = [
     {"text": "Tell me about Insight Mesh", "action_id": "prompt_about"},
     {"text": "How can I query my data?", "action_id": "prompt_query"},
-    {"text": "Help me with RAG", "action_id": "prompt_rag"}
+    {"text": "Start a data indexing job", "action_id": "agent_index_data"},
+    {"text": "Check job status", "action_id": "agent_check_status"},
+    {"text": "Import data from Slack", "action_id": "agent_import_slack"}
+    {"text": "Tell me about the actions I can take", "action_id": "prompt_actions"}
 ]
+
+# Available agent processes
+AGENT_PROCESSES = {
+    "agent_index_data": {
+        "name": "Data Indexing Job",
+        "description": "Indexes your documents into the RAG system",
+        "command": "python dagster_project/run_job.py index_files"
+    },
+    "agent_import_slack": {
+        "name": "Slack Import Job",
+        "description": "Imports data from Slack channels",
+        "command": "python dagster_project/slack_assets.py run slack_channels_job"
+    },
+    # Add more agent processes as needed
+}
 
 async def get_llm_response(
     messages: List[Dict[str, str]],
@@ -72,6 +90,38 @@ async def get_llm_response(
         if close_session:
             await session.close()
 
+async def run_agent_process(process_id: str) -> Dict[str, Any]:
+    """Run an agent process in the background and return status info"""
+    if process_id not in AGENT_PROCESSES:
+        return {"success": False, "message": f"Unknown agent process: {process_id}"}
+    
+    process = AGENT_PROCESSES[process_id]
+    
+    try:
+        # Create a process to run the command
+        process_obj = await asyncio.create_subprocess_shell(
+            process["command"],
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE
+        )
+        
+        # Return immediately with process info
+        return {
+            "success": True,
+            "process_id": process_id,
+            "name": process["name"],
+            "status": "started",
+            "pid": process_obj.pid
+        }
+    except Exception as e:
+        logger.error(f"Error running agent process {process_id}: {e}")
+        return {
+            "success": False,
+            "process_id": process_id,
+            "name": process["name"],
+            "error": str(e)
+        }
+
 async def set_assistant_status(client: WebClient, channel: str, thread_ts: str, status: str = "Thinking..."):
     """Set the assistant status indicator"""
     try:
@@ -97,6 +147,74 @@ async def set_suggested_prompts(client: WebClient, channel: str, thread_ts: str,
     except SlackApiError as e:
         logger.error(f"Error setting suggested prompts: {e}")
 
+async def handle_agent_action(action_id: str, user_id: str, client: WebClient, channel: str, thread_ts: str):
+    """Handle agent process actions"""
+    logger.info(f"Handling agent action: {action_id}")
+    
+    if action_id not in AGENT_PROCESSES:
+        await client.chat_postMessage(
+            channel=channel,
+            text=f"Sorry, I couldn't find the requested agent process: {action_id}",
+            thread_ts=thread_ts
+        )
+        return
+    
+    # Set a status to indicate we're starting the process
+    await set_assistant_status(client, channel, thread_ts, f"Starting {AGENT_PROCESSES[action_id]['name']}...")
+    
+    # Run the agent process
+    result = await run_agent_process(action_id)
+    
+    if result["success"]:
+        # Create a rich message with process info
+        blocks = [
+            {
+                "type": "section",
+                "text": {
+                    "type": "mrkdwn",
+                    "text": f"🚀 *Agent Process Started*: {result['name']}"
+                }
+            },
+            {
+                "type": "section",
+                "fields": [
+                    {
+                        "type": "mrkdwn",
+                        "text": f"*Status:* {result['status']}"
+                    },
+                    {
+                        "type": "mrkdwn",
+                        "text": f"*Process ID:* {result['pid']}"
+                    }
+                ]
+            },
+            {
+                "type": "context",
+                "elements": [
+                    {
+                        "type": "mrkdwn",
+                        "text": f"Process started by <@{user_id}>"
+                    }
+                ]
+            }
+        ]
+        
+        await client.chat_postMessage(
+            channel=channel,
+            blocks=blocks,
+            text=f"Agent process {result['name']} started successfully.",
+            thread_ts=thread_ts
+        )
+    else:
+        await client.chat_postMessage(
+            channel=channel,
+            text=f"❌ Failed to start agent process: {result.get('error', 'Unknown error')}",
+            thread_ts=thread_ts
+        )
+    
+    # Clear the status
+    await set_assistant_status(client, channel, thread_ts, "")
+
 async def handle_message(
     text: str,
     user_id: str,
@@ -105,6 +223,12 @@ async def handle_message(
     thread_ts: Optional[str] = None
 ):
     logger.info(f"Handling message: {text} from user {user_id} in channel {channel}, thread {thread_ts}")
+    
+    # Check if this is an agent action trigger
+    for prompt in DEFAULT_PROMPTS:
+        if prompt["action_id"].startswith("agent_") and text.lower() == prompt["text"].lower():
+            await handle_agent_action(prompt["action_id"], user_id, client, channel, thread_ts)
+            return
     
     try:
         # Set thinking status if in a thread
@@ -115,7 +239,7 @@ async def handle_message(
         async with aiohttp.ClientSession() as session:
             session.headers.update({"X-Auth-Token": f"slack:{user_id}"})
             messages = [
-                {"role": "system", "content": "You are a helpful assistant for Insight Mesh, a RAG (Retrieval-Augmented Generation) system. You help users understand and work with their data."},
+                {"role": "system", "content": "You are a helpful assistant for Insight Mesh, a RAG (Retrieval-Augmented Generation) system. You help users understand and work with their data. You can also start agent processes on behalf of users when they request it."},
                 {"role": "user", "content": text}
             ]
             
@@ -166,7 +290,7 @@ async def handle_assistant_thread_started(body, client):
         # Optional: send a welcome message
         await client.chat_postMessage(
             channel=channel_id,
-            text="👋 Hello! I'm Insight Mesh Assistant. How can I help you today?",
+            text="👋 Hello! I'm Insight Mesh Assistant. I can help answer questions about your data or start agent processes for you. Try one of the suggested actions above!",
             thread_ts=thread_ts
         )
     except Exception as e:

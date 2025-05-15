@@ -7,7 +7,7 @@ This guide will help you configure your Slack app to use the new AI Apps feature
 1. Go to [Slack API Apps page](https://api.slack.com/apps) and select your bot application
 2. Navigate to "Agents & AI Apps" in the left navigation panel
 3. Toggle on "Enable AI App Features"
-4. Add an overview description (e.g., "Insight Mesh Assistant helps you interact with your data using RAG")
+4. Add an overview description (e.g., "Insight Mesh Assistant helps you interact with your data using RAG and run agent processes")
 5. Configure prompts:
    - You can use fixed prompts as defined in our code, or
    - Select dynamic prompts if you prefer the app to generate them based on context
@@ -63,7 +63,23 @@ export LLM_API_KEY="your-llm-api-key"
 export LLM_MODEL="gpt-4" # or other model supported by your LLM API
 ```
 
-## Step 7: Run the Bot
+## Step 7: Configure Agent Processes
+
+The bot now supports running agent processes in response to user requests. These processes are defined in the `AGENT_PROCESSES` dictionary in `app_ai.py`.
+
+By default, the following agent processes are available:
+
+1. **Data Indexing Job** - Indexes documents into the RAG system
+2. **Slack Import Job** - Imports data from Slack channels
+
+To add or modify agent processes:
+
+1. Edit the `AGENT_PROCESSES` dictionary in `app_ai.py`
+2. Make sure commands have the correct paths to their scripts
+3. Add corresponding entries to `DEFAULT_PROMPTS` to make them available as prompts
+4. Ensure the scripts are available and executable in the expected locations
+
+## Step 8: Run the Bot
 
 Start the bot using:
 
@@ -83,4 +99,6 @@ docker run -d --env-file .env --name insight-mesh-bot insight-mesh-slack-bot
 1. In Slack, you should see your AI App in the sidebar (may need to search in Apps)
 2. Click on the app to open the AI split view
 3. Try one of the suggested prompts or ask a question
-4. You should see the status indicator while it's thinking and then receive a response 
+4. You should see the status indicator while it's thinking and then receive a response
+5. Try starting an agent process by using one of the agent prompts (e.g., "Start a data indexing job")
+6. The bot should respond with a confirmation that the process has started and provide status details 

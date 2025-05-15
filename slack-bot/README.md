@@ -9,6 +9,7 @@ A Slack bot for Insight Mesh that leverages Slack's new AI Apps features to prov
 - **Status Indicators**: Shows loading states while generating responses
 - **Suggested Prompts**: Provides helpful prompt suggestions to guide users
 - **RAG Integration**: Connects to your LLM API for Retrieval-Augmented Generation
+- **Agent Processes**: Allows users to start and monitor data processing jobs directly from Slack
 
 ## Quick Start
 
@@ -41,6 +42,39 @@ The bot is built using:
 - **slack-bolt**: Slack's official Python framework for building Slack apps
 - **aiohttp**: Asynchronous HTTP client/server for Python
 - **LiteLLM Proxy**: Compatible with OpenAI's API for connecting to different LLM providers
+
+## Agent Processes
+
+The bot enables users to start and manage data processing jobs directly from Slack:
+
+### Available Processes:
+
+- **Data Indexing Job**: Index documents into the RAG system
+- **Slack Import Job**: Import data from Slack channels
+- **Check Job Status**: Check the status of running jobs
+
+To start an agent process, users can either:
+1. Select one of the suggested prompts (e.g., "Start a data indexing job")
+2. Type the exact command in the chat (e.g., "Start a data indexing job")
+
+The bot will respond with a confirmation message containing process details and a status.
+
+### Adding Custom Agent Processes
+
+To add a new agent process:
+
+1. Add it to the `AGENT_PROCESSES` dictionary in `app_ai.py`:
+   ```python
+   "agent_your_process": {
+       "name": "Your Process Name",
+       "description": "What your process does",
+       "command": "python path/to/script.py arg1 arg2"
+   }
+   ```
+2. Add a corresponding prompt in `DEFAULT_PROMPTS`:
+   ```python
+   {"text": "Start your process", "action_id": "agent_your_process"}
+   ```
 
 ## Development
 
