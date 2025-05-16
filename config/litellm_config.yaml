@@ -19,7 +19,7 @@ model_list:
 
   - model_name: gemini-2.5-flash
     litellm_params:
-      model: gemini-2.5-flash
+      model: vertex_ai/gemini-2.5-flash
       api_base: https://generativelanguage.googleapis.com/
       api_key: os.environ/GOOGLE_API_KEY
 

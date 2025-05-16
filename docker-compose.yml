@@ -46,6 +46,7 @@ services:
       - "8000:4000"
     environment:
       - OPENAI_API_KEY=${OPENAI_API_KEY}
+      - GOOGLE_API_KEY=${GOOGLE_API_KEY}
       - PORT=4000
       - MODEL_TYPE=openai
       - LITELLM_MASTER_KEY=sk-litellm-master-key-123456
