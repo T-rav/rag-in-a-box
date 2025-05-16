@@ -1,15 +1,45 @@
+import sys
+import os
+sys.path.insert(0, os.path.abspath(os.path.dirname(__file__) + "/.."))
+sys.path.insert(0, "/app")
+
+import logging
+
+# Create a custom logger (named "rag_handler") and set its level to INFO.
+logger = logging.getLogger("rag_handler")
+logger.setLevel(logging.INFO)
+
+# Determine log file path based on environment
+LOG_DIR = "/app" if os.path.exists("/app") else os.path.dirname(os.path.abspath(__file__))
+LOG_FILE = os.path.join(LOG_DIR, "rag_handler.log")
+
+# Create a console handler to output logs to stdout
+console_handler = logging.StreamHandler(sys.stdout)
+console_handler.setLevel(logging.INFO)
+console_formatter = logging.Formatter("%(asctime)s - %(name)s - %(levelname)s - %(message)s")
+console_handler.setFormatter(console_formatter)
+logger.addHandler(console_handler)
+
+try:
+    # Try to create a file handler, but don't fail if it's not possible
+    file_handler = logging.FileHandler(LOG_FILE)
+    file_handler.setLevel(logging.INFO)
+    file_formatter = logging.Formatter("%(asctime)s – %(name)s – %(levelname)s – %(message)s")
+    file_handler.setFormatter(file_formatter)
+    logger.addHandler(file_handler)
+    logger.info(f"File logging enabled: {LOG_FILE}")
+except Exception as e:
+    logger.warning(f"Could not set up file logging to {LOG_FILE}: {e}")
+
+# Log a message that the module has been loaded
+logger.info("!!! RAG HANDLER MODULE LOADED !!!")
+
 from litellm.integrations.custom_logger import CustomLogger
 from litellm.proxy.proxy_server import UserAPIKeyAuth, DualCache
 from typing import Optional, Literal, Dict, Any, List
-import logging
 import json
-import os
 import aiohttp
 import asyncio
-
-# Set up logging
-logging.basicConfig(level=logging.INFO)
-logger = logging.getLogger(__name__)
 
 # MCP Server configuration
 MCP_SERVER_URL = os.environ.get("MCP_SERVER_URL", "http://mcp:8000")
@@ -31,7 +61,7 @@ async def get_context_from_mcp(
         return None
         
     headers = {
-        "Authorization": f"Bearer {api_key}",
+        "x-api-key": api_key,
         "Content-Type": "application/json"
     }
     
@@ -89,11 +119,13 @@ def summarize_conversation_history(messages: List[Dict[str, str]]) -> str:
 class RAGHandler(CustomLogger):
     def __init__(self):
         self.session = None
+        logger.info("RAGHandler initialized")
         
     async def _ensure_session(self):
         """Ensure we have an active aiohttp session"""
         if self.session is None or self.session.closed:
             self.session = aiohttp.ClientSession()
+            logger.info("Created new aiohttp session")
         return self.session
 
     async def async_pre_call_hook(
@@ -103,36 +135,37 @@ class RAGHandler(CustomLogger):
         data: dict,
         call_type: Literal["completion", "text_completion", "embeddings", "image_generation", "moderation", "audio_transcription"]
     ):
+        logger.info("=== RAG HANDLER ENTRY POINT ===")
+        logger.info(f"Call type: {call_type}")
+        logger.info(f"Data keys: {list(data.keys())}")
+        
         try:
-            # Log headers from the request data
-            headers = data.get("proxy_server_request", {}).get("headers", {})
-            logger.info("=== RAG PRE-REQUEST HOOK CALLED ===")
-            
-            # Get authorization header if available
-            auth_header = headers.get("authorization", "")
-            if not auth_header:
-                logger.warning("No authorization header found")
-                return data
-                
-            # Extract token part
-            auth_token = auth_header[7:] if auth_header.startswith("Bearer ") else auth_header
-            
             # Only process completion requests
             if call_type != "completion":
+                logger.info("Skipping non-completion request")
                 return data
-            
-            # Extract the messages from the request
+
+            # Get the messages from the request
             messages = data.get("messages", [])
             if not messages:
+                logger.warning("No messages in request")
                 return data
+
+            # Always use default token as expected by MCP server
+            auth_token = "default_token"
+            logger.info("Using default token for MCP server")
             
             # Get the latest user message
             user_messages = [msg for msg in messages if msg.get("role") == "user"]
             if not user_messages:
+                logger.warning("No user messages found")
                 return data
                 
             latest_user_message = user_messages[-1]["content"]
+            logger.info(f"Latest user message: {latest_user_message[:100]}...")
+            
             history_summary = summarize_conversation_history(messages[:-1])  # Exclude latest message
+            logger.info(f"History summary: {history_summary[:100]}...")
             
             # Get context from MCP server
             session = await self._ensure_session()
@@ -145,61 +178,74 @@ class RAGHandler(CustomLogger):
                 session=session
             )
             
-            # Add context to system message if available
-            if context and context.get("documents"):
-                # Group documents by source
-                docs_by_source = {}
-                for doc in context["documents"]:
-                    source = doc["source"]
-                    if source not in docs_by_source:
-                        docs_by_source[source] = []
-                    docs_by_source[source].append(doc["content"])
-                
-                # Build the context string with sources at the top
+            # Only modify the request if we got valid context
+            if context and context.get("context_items"):
+                logger.info(f"Got {len(context['context_items'])} context items from MCP")
+                # Build the context string from context items
                 context_parts = []
+                document_sources = []  # Track document sources
+                for item in context["context_items"]:
+                    source = item.get("metadata", {}).get("source", "unknown")
+                    content = item.get("content", "")
+                    if content:
+                        # Clean up the content by removing BOM and extra whitespace
+                        content = content.replace("\ufeff", "").strip()
+                        context_parts.append(f"[{source}]\n{content}\n")
+                        if source != "system_context":  # Don't include system context in sources
+                            document_sources.append(source)
                 
-                # Add source summary at the top
-                source_summary = "Sources used:\n"
-                for source, docs in docs_by_source.items():
-                    source_summary += f"- {source}: {len(docs)} document(s)\n"
-                context_parts.append(source_summary)
+                context_str = "\n\n".join(context_parts)
+                logger.info(f"Context string length: {len(context_str)}")
                 
-                # Add document contents
-                context_parts.append("\nRelevant content:")
-                for doc in context["documents"]:
-                    context_parts.append(f"\nFrom {doc['source']}:\n{doc['content']}")
+                # Create a system message that instructs the model to cite sources
+                system_message = (
+                    "You are a helpful assistant that MUST cite sources in EVERY response. "
+                    "IMPORTANT: You MUST explicitly mention which documents you used in your answer. "
+                    "Format your response like this:\n\n"
+                    "1. First, provide your answer\n"
+                    "2. Then, on a new line, write 'Sources used:' followed by a list of the document sources you referenced\n\n"
+                    "Here are the relevant documents to help answer the user's question:\n\n"
+                    f"{context_str}\n\n"
+                    "REMEMBER: You MUST cite your sources in EVERY response. If you don't cite sources, your response is incomplete."
+                )
                 
-                context_str = "\n".join(context_parts)
-                
-                # Update or create system message
+                # Find or create system message
                 system_messages = [msg for msg in messages if msg.get("role") == "system"]
                 if system_messages:
-                    system_messages[0]["content"] = f"{system_messages[0]['content']}\n\nBegin your response with a 'Sources:' section that lists all the sources you used, followed by your answer. When providing information in your answer, cite your sources using the format 'According to [source]' or 'From [source]'. For example:\n\nSources:\n- google_drive (2 documents)\n- slack (1 document)\n- web (2 documents)\n\nAccording to google_drive: [information]\nFrom slack: [information]\n\nUse the following context to inform your response:\n\n{context_str}"
+                    # Update the system message with context
+                    system_messages[0]["content"] = system_message
+                    logger.info("Updated existing system message with context")
                 else:
+                    # Create new system message with context
                     messages.insert(0, {
                         "role": "system",
-                        "content": f"You are a helpful assistant. Begin your response with a 'Sources:' section that lists all the sources you used, followed by your answer. When providing information in your answer, cite your sources using the format 'According to [source]' or 'From [source]'. For example:\n\nSources:\n- google_drive (2 documents)\n- slack (1 document)\n- web (2 documents)\n\nAccording to google_drive: [information]\nFrom slack: [information]\n\nUse the following context to inform your response:\n\n{context_str}"
+                        "content": system_message
                     })
+                    logger.info("Created new system message with context")
                 
-                # Update the request data with the modified messages
+                # Update the request data
                 data["messages"] = messages
                 logger.info("Successfully injected context into request")
+            else:
+                logger.info("No context items received from MCP")
             
         except Exception as e:
-            logger.error(f"Error in pre_request_hook: {str(e)}")
+            logger.error(f"Error in pre_request_hook: {str(e)}", exc_info=True)
+            # On error, return the original data unchanged
+            return data
         
         return data
 
     async def __aenter__(self):
-        """Ensure session is created when used as async context manager"""
         await self._ensure_session()
         return self
 
     async def __aexit__(self, exc_type, exc_val, exc_tb):
-        """Clean up session when done"""
         if self.session and not self.session.closed:
             await self.session.close()
             self.session = None
+            logger.info("Closed aiohttp session")
 
 # Create an instance of the handler
 rag_handler_instance = RAGHandler()
+logger.info("Created rag_handler_instance")

@@ -46,17 +46,21 @@ services:
       - "8000:4000"
     environment:
       - OPENAI_API_KEY=${OPENAI_API_KEY}
+      - GOOGLE_API_KEY=${GOOGLE_API_KEY}
       - PORT=4000
       - MODEL_TYPE=openai
       - LITELLM_MASTER_KEY=sk-litellm-master-key-123456
-      - LITELLM_SALT_KEY=semUmsej7yCU4XFEuegPB2Mj
+      - LITELLM_SALT_KEY="semUmsej7yCU4XFEuegPB2Mj"
       - DATABASE_URL=postgresql://postgres:postgres@postgres:5432/litellm
       - STORE_MODEL_IN_DB=True
       - REDIS_HOST=redis
       - REDIS_PORT=6379
+      - MCP_API_KEY=insight-mesh-mcp-abc-123
+      - PYTHONPATH=/app
+      - JWT_SECRET_KEY=your-super-secret-jwt-key-123  # Added JWT secret key
     volumes:
       - ./config/litellm_config.yaml:/app/config.yaml
-      - ./rag-pipeline:/app/rag-pipeline
+      - ./rag_pipeline:/app/rag_pipeline
     command: ["--config", "/app/config.yaml", "--detailed_debug"]
     depends_on:
       postgres:
@@ -197,8 +201,8 @@ services:
       context: ./mcp-server
       dockerfile: Dockerfile
     environment:
-      - MCP_API_KEY=${MCP_API_KEY}
-      - JWT_SECRET_KEY=${JWT_SECRET_KEY}
+      - MCP_API_KEY=insight-mesh-mcp-abc-123  # Set explicit value instead of env var
+      - JWT_SECRET_KEY=your-super-secret-jwt-key-123  # Added JWT secret key
       - DB_URL=postgresql+asyncpg://postgres:postgres@postgres:5432/openwebui
       - REDIS_URL=redis://redis:6379/0
       - ELASTICSEARCH_HOST=elasticsearch
@@ -223,7 +227,7 @@ services:
       # SLACK_APP_TOKEN is only needed for Socket Mode in the slack-bot service
       - SLACK_APP_TOKEN=${SLACK_APP_TOKEN}
       - LLM_API_URL=http://litellm:8000/v1
-      - LLM_API_KEY=${LLM_API_KEY}
+      - LLM_API_KEY=sk-litellm-master-key-123456  # Updated to use master key
       - LLM_MODEL=gpt-4
     depends_on:
       - litellm

@@ -1,4 +1,0 @@
-litellm>=1.0.0
-aiohttp>=3.8.0  # For async HTTP requests to MCP server
-python-dotenv>=1.0.0
-logging>=0.4.9 

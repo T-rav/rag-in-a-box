@@ -91,7 +91,7 @@ To customize the RAG pipeline, you can:
 
 1. Configure Dagster assets for your ETL workflows and scheduling needs
 2. Modify the Elasticsearch and Neo4j configurations for your specific data sources
-3. Create custom retrieval pipelines in the `rag-pipeline` directory
+3. Create custom retrieval pipelines in the `rag_pipeline` directory
 4. Connect your data sources to the system (currently supports Google Drive, with more integrations coming soon)
 
 ## Data Sources
