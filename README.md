@@ -11,7 +11,7 @@ Visit our website at [https://insightmesh.koderex.dev/](https://insightmesh.kode
 📊 Dagster -> ETL and scheduling engine for data ingestion and pipeline orchestration  
 📚 RAG Pipeline	Python (your code) -> Custom RAG injection code loaded dynamically like a plugin _(Inject company data, do auth checks, add guardrails to make it safe and prod ready)_   
 🔍 Elasticsearch & Neo4j -> Data and agents layer for building powerful search and retrieval systems  
-🛡️ Caddy	Static binary (Go)	-> Auth Proxy to allow OpenWebUI and LiteLLM to centralize auth  
+🛡️ Caddy	-> Auth Proxy to allow OpenWebUI and LiteLLM to centralize auth  
 
 **All you need to do is build the data pipelines to ingest and index**
 
