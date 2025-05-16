@@ -11,6 +11,18 @@ model_list:
       api_base: https://api.openai.com/v1
       api_key: os.environ/OPENAI_API_KEY
 
+  - model_name: gpt-4o-mini
+    litellm_params:
+      model: gpt-4o-mini
+      api_base: https://api.openai.com/v1
+      api_key: os.environ/OPENAI_API_KEY
+
+  - model_name: gemini-2.5-flash
+    litellm_params:
+      model: gemini-2.5-flash
+      api_base: https://generativelanguage.googleapis.com/
+      api_key: os.environ/GOOGLE_API_KEY
+
 environment_variables:
   OPENAI_API_KEY: ${OPENAI_API_KEY}
 
