@@ -7,12 +7,14 @@
 :80 {
     # Root path - no auth, just proxy to OpenWebUI
     route /* {
+        # Pass oauth_id_token cookie value as x-pass-thru-token header
+        header +X-Pass-Thru-Token "{http.request.cookie.oauth_id_token}"
         reverse_proxy openwebui:3000
     }
 
     # Debug route to check cookie extraction
     route /debug {
-        respond "Cookie token: {http.request.cookie.token}" 200
+        respond "Cookie token: {http.request.cookie.token}\nOAuth ID Token: {http.request.cookie.oauth_id_token}" 200
     }
 
     # LiteLLM proxy with token forwarding - ONLY for OpenWebUI to LiteLLM communication
@@ -20,6 +22,8 @@
         # Only extract token from cookie and add as Authorization header
         # This is the ONLY place where cookie-to-header conversion happens
         header Authorization "Bearer {http.request.cookie.token}"
+        # Pass oauth_id_token cookie value as x-pass-thru-token header
+        header +X-Pass-Thru-Token "{http.request.cookie.oauth_id_token}"
         reverse_proxy litellm:4000
     }
 

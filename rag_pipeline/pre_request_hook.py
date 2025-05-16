@@ -151,9 +151,27 @@ class RAGHandler(CustomLogger):
                 logger.warning("No messages in request")
                 return data
 
-            # Always use default token as expected by MCP server
-            auth_token = "default_token"
-            logger.info("Using default token for MCP server")
+            # Try to get the auth token from the X-Pass-Thru-Token header in metadata
+            auth_token = "default_token"  # Fallback default
+            
+            # Get headers from metadata - this is where LiteLLM puts client headers
+            headers = data.get("metadata", {}).get("headers", {})
+            if headers:
+                logger.info(f"Headers in request: {list(headers.keys())}")
+                
+                # Check for X-Pass-Thru-Token header (case-insensitive)
+                pass_thru_token = (
+                    headers.get("X-Pass-Thru-Token") or 
+                    headers.get("x-pass-thru-token")
+                )
+                
+                if pass_thru_token:
+                    logger.info(f"Found X-Pass-Thru-Token: {pass_thru_token[:10]}...")
+                    auth_token = pass_thru_token
+                else:
+                    logger.info("No X-Pass-Thru-Token found in headers, using default token")
+            else:
+                logger.info("No headers found in metadata, using default token")
             
             # Get the latest user message
             user_messages = [msg for msg in messages if msg.get("role") == "user"]

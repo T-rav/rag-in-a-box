@@ -1,7 +1,7 @@
 services:
   # OpenWebUI service
   openwebui:
-    image: ghcr.io/open-webui/open-webui:main
+    image: tmfrisinger/open-webui:1.0.1
     ports:
       - "3000:3000"
     environment:
@@ -16,7 +16,7 @@ services:
       - POSTGRES_DATABASE=openwebui
       - DEFAULT_MODEL=gpt-4o
       - OPENAI_API_KEY=sk-litellm-master-key-123456
-      - OPENAI_API_BASE_URL=http://litellm:4000/v1
+      - OPENAI_API_BASE_URL=http://caddy:80/v1
       - OPENAI_API_MODELS=gpt-4,gpt-4o
       - ENABLE_SIGNUP=true
       - ENABLE_OAUTH_SIGNUP=true
