@@ -1,7 +1,7 @@
 services:
   # OpenWebUI service
   openwebui:
-    image: tmfrisinger/open-webui:cookies
+    image: tmfrisinger/open-webui:1.0.1
     ports:
       - "3000:3000"
     environment:
